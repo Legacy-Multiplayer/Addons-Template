@@ -12,7 +12,7 @@ This guide walks through creating custom native addons using this template.
    ```cmake
    project(MyCustomAddon VERSION 1.0.0 LANGUAGES CXX)
    ```
-   and the target properties:
+   and the target output name:
    ```cmake
    set_target_properties(${PROJECT_NAME} PROPERTIES
        PREFIX ""
@@ -27,7 +27,34 @@ In `src/Main.cpp`, keep the standard exported entry points:
 
 ---
 
-## 2. Exposing Native Functions to Lua
+## 2. Calling Direct Server Subsystem APIs
+
+Legacy Server exposes 15 direct subsystem tables on `AddonAPI`:
+`actor`, `player`, `vehicle`, `object`, `pickup`, `gangzone`, `label`, `menu`, `messaging`, `netstats`, `textdraw`, `filesystem`, `variables`, `world`, `timers`.
+
+These are direct function pointers into the server core, offering maximum performance without scripting overhead.
+
+### Example: Player and Messaging Subsystems
+```cpp
+void HealAndNotifyPlayer(int playerId)
+{
+    if (g_API && g_API->player && g_API->messaging)
+    {
+        if (g_API->player->IsConnected(playerId))
+        {
+            // Set player health to 100
+            g_API->player->SetHealth(playerId, 100.0f);
+
+            // Send green client message
+            g_API->messaging->SendClientMessage(playerId, 0x00FF00FF, "You have been healed!");
+        }
+    }
+}
+```
+
+---
+
+## 3. Exposing Native Functions to Lua
 
 Addons can expose high-performance native C/C++ routines directly to server Lua scripts.
 
@@ -79,7 +106,7 @@ print("Product: " .. product) -- 42
 
 ---
 
-## 3. Subscribing to Server & Custom Events
+## 4. Subscribing to Server & Custom Events
 
 Addons can listen to events dispatched by the server or by Lua scripts.
 
@@ -113,39 +140,55 @@ ADDON_EXPORT bool AddonMain(const AddonAPI* api, void* addon)
 
 ---
 
-## 4. Invoking Existing Server Lua Functions (`CallContext`)
+## 5. Exporting Global Variables & Constants to Lua
 
-Addons can call functions already registered in the server's Lua state without knowing their signatures ahead of time.
+Addons can export global variables into the server's Lua runtime during `AddonMain`:
 
-### Invocation Pattern:
 ```cpp
-CallContext* call = api->BeginCall(addon, "sendClientMessage");
+api->SetGlobalString(addon, "MY_ADDON_VERSION", "2.0.0");
+api->SetGlobalInteger(addon, "MY_ADDON_MAX_SLOTS", 64);
+api->SetGlobalBoolean(addon, "MY_ADDON_ENABLED", true);
+```
 
-// Push arguments in exact order expected by the function
-api->PushInteger(call, playerId);
-api->PushInteger(call, 0xFF0000FF); // Red color
-api->PushString(call, "Notice from native addon");
-
-if (api->ExecuteCall(call))
-{
-    size_t returnCount = api->GetResultCount(call);
-    if (returnCount > 0)
-    {
-        bool success = api->GetResultBoolean(call, 0);
-    }
-}
-else if (api->HasError(call))
-{
-    api->Log(addon, ADDON_LOG_ERROR, api->GetError(call));
-}
-
-// Always clean up the call context
-api->EndCall(call);
+In Lua:
+```lua
+print(MY_ADDON_VERSION)   -- "2.0.0"
+print(MY_ADDON_MAX_SLOTS) -- 64
 ```
 
 ---
 
-## 5. Resource Management & Clean Unload
+## 6. Invoking Dynamic Lua Functions (`CallContext`)
+
+For functions defined dynamically in Lua scripts or third-party gamemodes:
+
+```cpp
+CallContext* call = api->BeginCall(addon, "customGamemodeFunction");
+if (call)
+{
+    api->PushInteger(call, playerId);
+    api->PushString(call, "bonus_code");
+
+    if (api->ExecuteCall(call))
+    {
+        if (api->GetResultCount(call) > 0)
+        {
+            bool granted = api->GetResultBoolean(call, 0);
+        }
+    }
+    else if (api->HasError(call))
+    {
+        api->Log(addon, ADDON_LOG_WARN, api->GetError(call));
+    }
+
+    // Always release CallContext
+    api->EndCall(call);
+}
+```
+
+---
+
+## 7. Resource Management & Clean Unload
 
 Addons must clean up registered handles and heap allocations inside `AddonUnload`:
 
@@ -171,9 +214,9 @@ ADDON_EXPORT void AddonUnload(void)
 
 ---
 
-## 6. Architecture & ABI Guidelines
+## 8. Architecture & ABI Guidelines
 
 1. **Self-Contained ABI**: Do not link your addon directly against `server.exe` or private server static libraries. The server exposes everything through `Addon.h`.
-2. **No STL in ABI**: Use primitive C types and `Value` structures across the boundary.
-3. **Thread Affinity**: All callbacks and function invocations run synchronously on the server's main Lua thread. Do not call `AddonAPI` methods asynchronously from worker threads without proper synchronization.
-4. **Error Resilience**: `CallContext` and `FunctionCallback` executions are protected by Sol2 — runtime errors are reported through `api->GetError(call)` rather than crashing the server.
+2. **No STL in ABI**: Use primitive C types, `Value`, and `Vector3`/`Vector4` structures across the boundary.
+3. **Thread Affinity**: All callbacks and function invocations run synchronously on the server's main thread.
+4. **Error Resilience**: `CallContext` and `FunctionCallback` executions are protected — runtime errors are reported through `api->GetError(call)` rather than crashing the server.

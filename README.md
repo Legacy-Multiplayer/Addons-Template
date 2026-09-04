@@ -2,7 +2,7 @@
 
 A complete, standalone development template for creating native C/C++ addons for **Legacy Server**.
 
-Native addons are dynamically loaded shared libraries (`.dll` on Windows, `.so` on Linux) that extend the server through a versioned, ABI-stable C API (`AddonAPI`). Addons can expose native routines to Lua, listen to server events, dispatch custom events, and invoke existing server-side Lua functions via dynamic call builders.
+Native addons are dynamically loaded shared libraries (`.dll` on Windows, `.so` on Linux) that extend the server through a versioned, ABI-stable C API (`AddonAPI`). Addons can call direct server subsystems (players, vehicles, objects, messaging, world, etc.), expose native routines to Lua, listen to server events, dispatch custom events, and invoke dynamic Lua functions.
 
 ---
 
@@ -13,10 +13,9 @@ Legacy-Server-Addon-Template/
 ├── CMakeLists.txt              # Standalone CMake build configuration
 ├── README.md                   # Project documentation & quickstart
 ├── LICENSE                     # MIT license
-├── .gitignore                  # Git ignore rules for build artifacts
 │
 ├── include/
-│   └── Addon.h                 # Public Addon SDK & C ABI specification
+│   └── Addon.h                 # Public Addon SDK & C ABI specification (15 subsystems)
 │
 ├── src/
 │   └── Main.cpp                # Addon entry points & example implementation
@@ -92,8 +91,22 @@ Every addon exports two standard functions:
 
 ## 5. Main Features Demonstrated
 
-### 1. Exposing Native Functions to Lua
-Addons register native functions using `api->RegisterFunction`. The server's internal Sol2 engine automatically manages type marshalling between Lua and C:
+### 1. Direct Server Subsystem APIs (15 Subsystems)
+Addons have direct zero-overhead access to 15 core server subsystems:
+`actor`, `player`, `vehicle`, `object`, `pickup`, `gangzone`, `label`, `menu`, `messaging`, `netstats`, `textdraw`, `filesystem`, `variables`, `world`, `timers`.
+
+```cpp
+if (api->player && api->player->IsConnected(playerId))
+{
+    const char* name = api->player->GetName(playerId);
+    api->messaging->SendClientMessage(playerId, 0x00FF00FF, "Welcome!");
+}
+```
+
+---
+
+### 2. Exposing Native Functions to Lua
+Addons register native functions using `api->RegisterFunction`:
 
 ```cpp
 static int HelloFunction(const Value* arguments, size_t argumentCount, Value* results, size_t maxResults, void* userData)
@@ -125,47 +138,40 @@ print(msg) -- "Hello, Developer!"
 
 ---
 
-### 2. Calling Existing Lua Functions (`sendClientMessage`)
-The addon demonstrates dynamic invocation of `sendClientMessage`, a built-in server Lua function.
-
-> [!NOTE]
-> `sendClientMessage` is already registered by the server. The addon invokes it dynamically via `CallContext` without re-registering or reimplementing it.
+### 3. Setting Global Lua Constants & Variables
+Addons can export typed globals into Lua during initialization:
 
 ```cpp
-CallContext* call = api->BeginCall(addon, "sendClientMessage");
-
-// Push arguments according to the server's Lua signature: (playerId, color, message)
-api->PushInteger(call, playerId);
-api->PushInteger(call, 0x00FF00FF); // Green RGBA
-api->PushString(call, "Welcome to the server! (From Native Addon)");
-
-if (api->ExecuteCall(call))
-{
-    // Function executed successfully
-    if (api->GetResultCount(call) > 0)
-    {
-        bool sent = api->GetResultBoolean(call, 0);
-    }
-}
-else if (api->HasError(call))
-{
-    api->Log(addon, ADDON_LOG_ERROR, api->GetError(call));
-}
-
-api->EndCall(call);
+api->SetGlobalString(addon, "EXAMPLE_ADDON_VERSION", "1.0.0");
+api->SetGlobalInteger(addon, "EXAMPLE_ADDON_LOADED", 1);
 ```
 
 ---
 
-### 3. Subscribing to Server Events
-Addons can subscribe to server lifecycle and gameplay events (e.g. `onPlayerConnect`, `onPlayerDisconnect`, `onPlayerSpawn`):
+### 4. Dynamic Function Invocation (`CallContext`)
+For functions defined dynamically in Lua scripts:
+
+```cpp
+CallContext* call = api->BeginCall(addon, "onCustomLuaEvent");
+if (call)
+{
+    api->PushInteger(call, 42);
+    api->ExecuteCall(call);
+    api->EndCall(call);
+}
+```
+
+---
+
+### 5. Subscribing to Server & Custom Events
+Addons can subscribe to server lifecycle and gameplay events (e.g. `onPlayerConnect`):
 
 ```cpp
 static void OnPlayerConnectHandler(const char* eventName, const Value* arguments, size_t argumentCount, void* userData)
 {
-    if (argumentCount > 0 && (arguments[0].type == ADDON_VALUE_INTEGER || arguments[0].type == ADDON_VALUE_NUMBER))
+    if (argumentCount > 0)
     {
-        int64_t playerId = arguments[0].integerValue;
+        int playerId = (int)arguments[0].integerValue;
         // Handle player connection...
     }
 }
@@ -176,47 +182,17 @@ api->RegisterEvent(addon, "onPlayerConnect", OnPlayerConnectHandler, nullptr);
 
 ---
 
-### 4. Triggering Custom Addon Events
-Addons can dispatch custom events into the server's Lua event bus (`LuaEvents`):
-
-```cpp
-Value eventArgs[1];
-eventArgs[0] = ValueString("ExampleAddon is ready.");
-api->TriggerEvent(addon, "ExampleAddon.OnReady", eventArgs, 1);
-```
-
-In Lua:
-```lua
-addEventHandler("ExampleAddon.OnReady", function(message)
-    print("Received custom addon event: " .. message)
-end)
-```
-
----
-
 ## 6. ABI & Safety Guarantees
 
-- **No C++ Standard Library in ABI**: The public API uses C-compatible structs (`Value`, `AddonAPI`) and opaque pointers (`CallContext`).
-- **No Sol2 / Lua Dependencies**: Addons do not link against Lua or Sol2. The server handles all runtime interactions internally.
-- **Reentrancy**: `CallContext` allocations are isolated per-call, making nested calls within callbacks fully thread-safe on the main Lua thread.
-- **Protected Execution**: Lua errors during function execution are captured and returned via `api->GetError(call)` rather than crashing the server.
+- **No C++ Standard Library in ABI**: The public API uses C-compatible structs (`Value`, `Vector3`, `AddonAPI`) and opaque pointers (`CallContext`).
+- **No Sol2 / Lua Direct Linking**: Addons do not link against Lua or Sol2. The server handles all runtime interactions internally.
+- **Protected Execution**: Lua errors during dynamic function execution are captured and returned via `api->GetError(call)` rather than crashing the server.
 
 ---
 
-## 7. Troubleshooting & Common Mistakes
+## 7. Documentation Index
 
-| Issue | Cause | Solution |
-| :--- | :--- | :--- |
-| Addon fails to load (`AddonMain` returns `false`) | API version mismatch | Ensure `Addon.h` version matches the server's `ADDON_API_VERSION`. |
-| `ExecuteCall` returns `false` | Function name not found or invalid arguments | Verify the Lua function name and argument order against `docs/API.md`. Use `api->GetError(call)` to inspect the Lua runtime error message. |
-| Memory leak on dynamic calls | Missing `EndCall` | Always invoke `api->EndCall(call)` after finishing execution and reading results. |
-| Crash during server shutdown | Missing `AddonUnload` cleanup | Ensure `UnregisterFunction` and `UnregisterEvent` are called for all active handles in `AddonUnload`. |
-
----
-
-## 8. Documentation Index
-
-- [**API Reference**](docs/API.md): Full technical specification of all types, enums, functions, and callbacks.
+- [**API Reference**](docs/API.md): Full technical specification of all 15 subsystems, types, functions, and callbacks.
 - [**Building Guide**](docs/BUILDING.md): Detailed compilation instructions for Windows and Linux.
 - [**Development Guide**](docs/DEVELOPMENT.md): Guide for creating and customizing new native addons.
 

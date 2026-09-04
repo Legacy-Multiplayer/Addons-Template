@@ -6,12 +6,14 @@ This document provides the complete technical specification for the Legacy Serve
 
 ## 1. Overview & Architecture
 
-Legacy Server native addons are dynamic shared libraries (`.dll` on Windows, `.so` on Linux) loaded directly into the server process. Addons interact with the server through a versioned, C-compatible function table (`AddonAPI`) and lightweight, ABI-safe data structures (`Value`, `CallContext`).
+Legacy Server native addons are dynamic shared libraries (`.dll` on Windows, `.so` on Linux) loaded directly into the server process. Addons interact with the server through a versioned, C-compatible function table (`AddonAPI`) and lightweight, ABI-safe data structures (`Value`, `CallContext`, `Vector3`, `Vector4`).
 
 ### Key Principles:
-- **ABI Stability**: No C++ standard library structures (`std::string`, `std::vector`) or internal engine headers (Sol2, Lua) cross the ABI boundary.
-- **Server Owns Runtime**: The server manages the Lua 5.4.1 state, Sol2 binding layer, and event dispatch pipeline.
-- **Dynamic Invocations**: The addon can call any existing Lua function using the dynamic `CallContext` builder pattern without rigid argument buffers.
+- **Direct Subsystem Performance**: 15 direct server subsystem API tables provide zero-overhead native function calls into the server core (Players, Vehicles, Objects, Messaging, World, etc.).
+- **Dynamic Invocations**: The addon can call any Lua script function dynamically using the `CallContext` builder pattern.
+- **Global Lua Exports**: Addons can export typed global constants (`SetGlobalInteger`, `SetGlobalString`, etc.) directly into the Lua state.
+- **ABI Stability**: No C++ standard library structures (`std::string`, `std::vector`) cross the ABI boundary.
+- **Server Owns Runtime**: The server manages Lua state and lifecycle.
 
 ---
 
@@ -71,6 +73,25 @@ typedef struct Value {
 
 ---
 
+### POD Vectors
+
+```c
+typedef struct Vector3 {
+    float x;
+    float y;
+    float z;
+} Vector3;
+
+typedef struct Vector4 {
+    float x;
+    float y;
+    float z;
+    float w;
+} Vector4;
+```
+
+---
+
 ### `CallContext`
 An opaque struct representing an active dynamic function call context.
 
@@ -79,7 +100,7 @@ typedef struct CallContext CallContext;
 ```
 
 - **Lifetime**: Allocated by `api->BeginCall(...)` and must be released via `api->EndCall(...)`.
-- **Reentrancy**: Each `CallContext` instance is completely isolated. Nested calls (e.g. inside a callback) are fully supported.
+- **Reentrancy**: Each `CallContext` instance is completely isolated.
 - **Memory Safety**: String pointers returned from `GetResultString` remain valid throughout the lifetime of the `CallContext`.
 
 ---
@@ -150,181 +171,115 @@ ADDON_EXPORT void AddonUnload(void);
 
 ---
 
-## 5. AddonAPI Function Reference
+## 5. AddonAPI Core Methods
 
 ### Addon Metadata & Logging
-
-#### `GetName`
-```c
-const char* (*GetName)(void* addon);
-```
-Returns the base name of the addon (e.g., `"ExampleAddon"`).
-
-#### `GetPath`
-```c
-const char* (*GetPath)(void* addon);
-```
-Returns the absolute filesystem path of the loaded addon binary.
-
-#### `Log`
-```c
-void (*Log)(void* addon, LogLevel level, const char* message);
-```
-Writes a formatted message to the server log and console with automatic `[Addon: <Name>]` prefixing.
-
----
+- `const char* (*GetName)(void* addon);` — Returns the addon's name.
+- `const char* (*GetPath)(void* addon);` — Returns the absolute path of the loaded addon library.
+- `void (*Log)(void* addon, LogLevel level, const char* message);` — Logs a message to the server console and log file.
 
 ### Function Registration
+- `uint64_t (*RegisterFunction)(void* addon, const char* functionName, FunctionCallback callback, void* userData);` — Registers a native function into Lua.
+- `bool (*UnregisterFunction)(void* addon, uint64_t handle);` — Unregisters a native function.
 
-#### `RegisterFunction`
-```c
-uint64_t (*RegisterFunction)(
-    void* addon,
-    const char* functionName,
-    FunctionCallback callback,
-    void* userData
-);
-```
-Registers a native C function into the server's Lua global namespace.
-- **Returns**: A non-zero registration handle on success, or `0` on failure.
+### Event System
+- `uint64_t (*RegisterEvent)(void* addon, const char* eventName, EventCallback callback, void* userData);` — Subscribes to server/custom events.
+- `bool (*UnregisterEvent)(void* addon, uint64_t handle);` — Unsubscribes from an event.
+- `bool (*TriggerEvent)(void* addon, const char* eventName, const Value* arguments, size_t argumentCount);` — Dispatches an event to the Lua event bus.
 
-#### `UnregisterFunction`
-```c
-bool (*UnregisterFunction)(void* addon, uint64_t handle);
-```
-Removes a previously registered native function from the Lua state.
-
----
-
-### Event Registration & Dispatching
-
-#### `RegisterEvent`
-```c
-uint64_t (*RegisterEvent)(
-    void* addon,
-    const char* eventName,
-    EventCallback callback,
-    void* userData
-);
-```
-Subscribes to an existing server event (e.g., `"onPlayerConnect"`, `"onPlayerDisconnect"`, `"onPlayerSpawn"`) or a custom addon event.
-- **Returns**: A non-zero event registration handle on success, or `0` on failure.
-
-#### `UnregisterEvent`
-```c
-bool (*UnregisterEvent)(void* addon, uint64_t handle);
-```
-Unsubscribes the event handler associated with `handle`.
-
-#### `TriggerEvent`
-```c
-bool (*TriggerEvent)(
-    void* addon,
-    const char* eventName,
-    const Value* arguments,
-    size_t argumentCount
-);
-```
-Dispatches an event into the server's Lua event bus (`LuaEvents`). Any Lua event handlers registered via `addEventHandler(eventName, ...)` will be invoked synchronously.
-
----
+### Global Lua Constants
+- `bool (*SetGlobalInteger)(void* addon, const char* name, int64_t value);`
+- `bool (*SetGlobalNumber)(void* addon, const char* name, double value);`
+- `bool (*SetGlobalString)(void* addon, const char* name, const char* value);`
+- `bool (*SetGlobalBoolean)(void* addon, const char* name, bool value);`
 
 ### Dynamic Function Calling (`CallContext`)
-
-The `CallContext` builder pattern allows native addons to invoke any server Lua function with arbitrary arguments and return values.
-
-#### `BeginCall`
-```c
-CallContext* (*BeginCall)(void* addon, const char* functionName);
-```
-Allocates and initializes a new dynamic call context targeting `functionName`. Supports global names (e.g. `"sendClientMessage"`) and nested table paths (e.g. `"math.floor"`).
-
-#### `EndCall`
-```c
-void (*EndCall)(CallContext* context);
-```
-Frees the memory associated with the call context. Must always be called after execution and reading results.
-
-#### Argument Push Functions:
+- `CallContext* (*BeginCall)(void* addon, const char* functionName);`
+- `void (*EndCall)(CallContext* context);`
 - `bool (*PushNil)(CallContext* context);`
 - `bool (*PushBoolean)(CallContext* context, bool value);`
 - `bool (*PushInteger)(CallContext* context, int64_t value);`
 - `bool (*PushNumber)(CallContext* context, double value);`
 - `bool (*PushString)(CallContext* context, const char* value);`
 - `bool (*PushValue)(CallContext* context, const Value* value);`
-
-Appends an argument to the call's dynamic parameter list. Returns `true` on success.
-
-#### `ExecuteCall`
-```c
-bool (*ExecuteCall)(CallContext* context);
-```
-Executes the function inside the server's Sol2 protected call environment.
-- **Returns**: `true` if execution succeeded; `false` if the target was not found, was not callable, or threw a Lua runtime exception.
-
-#### Result Query Functions:
-- `size_t (*GetResultCount)(const CallContext* context);` — Returns the number of values returned by Lua ($0..M$).
-- `ValueType (*GetResultType)(const CallContext* context, size_t index);` — Returns the type of the result at `index`.
-- `bool (*GetResultBoolean)(const CallContext* context, size_t index);` — Retrieves boolean result.
-- `int64_t (*GetResultInteger)(const CallContext* context, size_t index);` — Retrieves integer result.
-- `double (*GetResultNumber)(const CallContext* context, size_t index);` — Retrieves floating-point number result.
-- `const char* (*GetResultString)(const CallContext* context, size_t index);` — Retrieves string result.
-- `bool (*GetResultValue)(const CallContext* context, size_t index, Value* outValue);` — Copies result into a `Value` struct.
-
-#### Error Handling Functions:
-- `bool (*HasError)(const CallContext* context);` — Returns `true` if an error occurred.
-- `const char* (*GetError)(const CallContext* context);` — Returns the descriptive error message or Lua stack trace.
+- `bool (*ExecuteCall)(CallContext* context);`
+- `size_t (*GetResultCount)(const CallContext* context);`
+- `ValueType (*GetResultType)(const CallContext* context, size_t index);`
+- `bool (*GetResultBoolean)(const CallContext* context, size_t index);`
+- `int64_t (*GetResultInteger)(const CallContext* context, size_t index);`
+- `double (*GetResultNumber)(const CallContext* context, size_t index);`
+- `const char* (*GetResultString)(const CallContext* context, size_t index);`
+- `bool (*GetResultValue)(const CallContext* context, size_t index, Value* outValue);`
+- `bool (*HasError)(const CallContext* context);`
+- `const char* (*GetError)(const CallContext* context);`
 
 ---
 
-## 6. Calling Existing Lua Functions (`sendClientMessage`)
+## 6. Server Subsystem APIs (15 Subsystems)
 
-Legacy Server already registers core game functions in its Lua runtime. Native addons invoke these functions through `CallContext`.
+The `AddonAPI` provides direct function pointers to the core server subsystems:
 
-> [!IMPORTANT]
-> **Do not re-register built-in server functions.** Built-in functions such as `sendClientMessage` are already provided by the server. Your addon simply calls them.
+### 1. `ActorAPI` (`api->actor`)
+Controls server-side static NPC actors.
+- `Create`, `Destroy`, `IsValid`, `SetPosition`, `GetPosition`, `SetFacingAngle`, `GetFacingAngle`, `SetHealth`, `GetHealth`, `SetInvulnerable`, `IsInvulnerable`, `SetVirtualWorld`, `GetVirtualWorld`, `ApplyAnimation`, `ClearAnimations`.
 
-### Real Server Lua Signature:
-```lua
-sendClientMessage(playerId: integer, color: integer, message: string) -> boolean
-```
+### 2. `PlayerAPI` (`api->player`)
+Comprehensive player state queries and manipulation.
+- Queries: `IsConnected`, `GetName`, `GetIp`, `GetPosition`, `GetVelocity`, `GetCameraPosition`, `GetCameraFrontVector`, `GetWorldBounds`, `GetKeys`, `GetTime`, `GetWeaponData`, `GetHealth`, `GetArmour`, `GetFacingAngle`, `GetPing`, `GetScore`, `GetMoney`, `GetSkin`, `GetColor`, `GetInterior`, `GetVirtualWorld`, `GetState`, `GetVehicleId`, `GetWeapon`, `GetAmmo`, `GetWantedLevel`, `GetSpecialAction`, `GetDrunkLevel`, `GetCount`, `GetPoolSize`, `GetIdFromName`, `GetVersion`, `GetGPCI`, `IsInRangeOfPoint`, `GetDistanceFromPoint`, `IsInVehicle`, `IsInAnyVehicle`, `IsNPC`, `IsAdmin`.
+- Actions: `SetSpawnInfo`, `Spawn`, `ForceClassSelection`, `SetPosition`, `SetPositionFindZ`, `SetHealth`, `SetArmour`, `SetFacingAngle`, `SetInterior`, `SetVelocity`, `SetSkin`, `SetTeam`, `SetColor`, `SetVirtualWorld`, `SetTime`, `SetScore`, `GiveMoney`, `SetMoney`, `ResetMoney`, `SetName`, `SetDrunkLevel`, `SetWantedLevel`, `PutInVehicle`, `RemoveFromVehicle`, `ToggleControllable`, `PlaySound`, `ApplyAnimation`, `ClearAnimations`, `SetSpecialAction`, `SetCheckpoint`, `DisableCheckpoint`, `SetRaceCheckpoint`, `DisableRaceCheckpoint`, `SetWorldBounds`, `ClearWorldBounds`, `SetMarkerForPlayer`, `ShowNameTagForPlayer`, `SetMapIcon`, `RemoveMapIcon`, `AllowTeleport`, `SetCameraPos`, `SetCameraLookAt`, `SetCameraBehindPlayer`, `ToggleSpectating`, `SpectatePlayer`, `SpectateVehicle`, `SetAmmo`, `GiveWeapon`, `ResetWeapons`, `SetSkillLevel`, `SetArmedWeapon`, `SetFightingStyle`, `SetMaxHealth`, `InterpolateCameraPos`, `InterpolateCameraLookAt`, `SetBlurLevel`, `SetGameSpeed`, `SendClientCheck`, `ToggleChatbox`, `ToggleWidescreen`, `SetShopName`, `PlayAudioStream`, `StopAudioStream`, `PlayCrimeReport`, `DisableRemoteVehicleCollisions`, `SetChatBubble`, `SetWeather`, `ToggleClock`, `SetAdmin`, `CreatePlayerPickup`, `DestroyPlayerPickup`.
+- Player Variables (PVars): `SetPVarInt`, `SetPVarString`, `SetPVarFloat`, `GetPVarInt`, `GetPVarString`, `GetPVarFloat`, `DeletePVar`, `GetPVarType`, `GetPVarNameAtIndex`, `GetPVarsUpperIndex`.
 
-- **`playerId`**: Target player ID ($0..\text{MAX\_PLAYERS}-1$).
-- **`color`**: Hexadecimal color code in RGBA/ARGB format (e.g. `0x00FF00FF` for green, `0xFFFFFFFF` for white).
-- **`message`**: UTF-8 string to display in the client chat window.
-- **Returns**: `true` if dispatched to the connected client; `false` if player is not connected or network is unavailable.
+### 3. `VehicleAPI` (`api->vehicle`)
+Vehicle creation, properties, components, damage, and synchronization.
+- `Create`, `AddStatic`, `AddStaticEx`, `Destroy`, `IsValid`, `GetModel`, `GetInterior`, `LinkToInterior`, `GetPosition`, `SetPosition`, `GetZAngle`, `SetZAngle`, `GetHealth`, `SetHealth`, `SetToRespawn`, `GetColor`, `ChangeColor`, `ChangePaintjob`, `GetPaintjob`, `SetNumberPlate`, `GetNumberPlate`, `AttachTrailer`, `DetachTrailer`, `IsTrailerAttached`, `GetTrailer`, `SetVirtualWorld`, `GetVirtualWorld`, `GetVelocity`, `SetVelocity`, `SetAngularVelocity`, `IsOnItsSide`, `IsUpsideDown`, `GetSirenState`, `IsWrecked`, `IsSunked`, `GetRespawnDelay`, `SetRespawnDelay`, `GetDamageStatus`, `UpdateDamageStatus`, `SetParamsForPlayer`, `ManualEngineAndLights`, `Repair`, `Explode`, `SetParamsCarDoors`, `GetParamsCarDoors`, `SetParamsCarWindows`, `GetParamsCarWindows`, `ToggleTaxiLight`, `SetEngineState`, `SetLightState`, `SetFeature`, `SetVisibility`, `SetHoodState`, `SetTrunkState`, `SetDoorState`, `GetSpawnInfo`, `SetSpawnInfo`, `GetSpawnPos`, `SetSpawnPos`, `GetComponentInSlot`, `GetComponentType`, `AddComponent`, `RemoveComponent`, `GetModelInfo`, `GetParamsSirenState`, `GetRotationQuat`, `GetDistanceFromPoint`, `GetPoolSize`, `GetModelCount`, `GetModelsUsed`.
 
-### Complete Native Invocation Example:
-```cpp
-bool SendMessageToPlayer(const AddonAPI* api, void* addon, int64_t playerId, int64_t color, const char* text)
-{
-    if (!api || !addon || !text) return false;
+### 4. `ObjectAPI` (`api->object`)
+Global and per-player dynamic world objects, materials, and attachments.
+- Global: `Create`, `AttachToVehicle`, `AttachToObject`, `AttachToPlayer`, `SetPos`, `GetPos`, `SetRot`, `GetRot`, `IsValid`, `Destroy`, `Move`, `Stop`, `IsMoving`, `SetMaterial`, `SetMaterialText`.
+- Per-Player: `CreatePlayer`, `DestroyPlayer`, `IsValidPlayer`, `SetPlayerPos`, `GetPlayerPos`, `SetPlayerRot`, `GetPlayerRot`, `MovePlayer`, `StopPlayer`, `IsPlayerMoving`, `AttachPlayerToPlayer`, `AttachPlayerToVehicle`, `SetPlayerMaterial`, `SetPlayerMaterialText`.
 
-    // 1. Begin call context for "sendClientMessage"
-    CallContext* call = api->BeginCall(addon, "sendClientMessage");
-    if (!call) return false;
+### 5. `PickupAPI` (`api->pickup`)
+World pickups and static pickups.
+- `Create`, `AddStatic`, `Destroy`, `DestroyAll`, `IsValid`, `IsStatic`, `GetPosition`, `GetModel`, `GetType`, `GetCount`, `GetPoolSize`, `GetVirtualWorld`.
 
-    // 2. Push arguments in exact order: (playerId, color, message)
-    api->PushInteger(call, playerId);
-    api->PushInteger(call, color);
-    api->PushString(call, text);
+### 6. `GangZoneAPI` (`api->gangzone`)
+Radar gang zones, coloring, and flashing.
+- `Create`, `Destroy`, `ShowForPlayer`, `ShowForAll`, `HideForPlayer`, `HideForAll`, `FlashForPlayer`, `FlashForAll`, `StopFlashForPlayer`, `StopFlashForAll`, `IsValid`.
 
-    // 3. Execute protected call
-    bool sent = false;
-    if (api->ExecuteCall(call))
-    {
-        if (api->GetResultCount(call) > 0)
-        {
-            sent = api->GetResultBoolean(call, 0);
-        }
-    }
-    else if (api->HasError(call))
-    {
-        api->Log(addon, ADDON_LOG_ERROR, api->GetError(call));
-    }
+### 7. `LabelAPI` (`api->label`)
+Global and per-player 3D text labels.
+- Global: `Create3DText`, `Delete3DText`, `Attach3DTextToPlayer`, `Attach3DTextToVehicle`, `Update3DText`, `IsValid3DText`.
+- Per-Player: `CreatePlayer3DText`, `DeletePlayer3DText`, `UpdatePlayer3DText`, `IsValidPlayer3DText`.
 
-    // 4. Clean up call context
-    api->EndCall(call);
-    return sent;
-}
-```
+### 8. `MenuAPI` (`api->menu`)
+In-game text menus.
+- `Create`, `Destroy`, `AddItem`, `SetColumnHeader`, `ShowForPlayer`, `HideForPlayer`, `IsValid`, `Disable`, `DisableRow`, `GetPlayerMenu`.
+
+### 9. `MessagingAPI` (`api->messaging`)
+Chat, system messages, death messages, and game texts.
+- `SendClientMessage`, `SendClientMessageToAll`, `SendPlayerMessageToPlayer`, `SendPlayerMessageToAll`, `SendDeathMessage`, `SendDeathMessageToPlayer`, `GameTextForAll`, `GameTextForPlayer`.
+
+### 10. `NetStatsAPI` (`api->netstats`)
+RakNet network statistics and telemetry.
+- `GetNetworkStats`, `GetPlayerNetworkStats`, `GetBytesReceived`, `GetBytesSent`, `GetMessagesReceived`, `GetMessagesSent`, `GetMessagesRecvPerSecond`, `GetPacketLossPercent`, `GetConnectionStatus`, `GetConnectedTime`, `GetIpPort`.
+
+### 11. `TextDrawAPI` (`api->textdraw`)
+Global and per-player GUI textdraws, fonts, shadows, and boxes.
+- Global: `Create`, `Destroy`, `IsValid`, `LetterSize`, `TextSize`, `Alignment`, `Color`, `UseBox`, `BoxColor`, `SetShadow`, `SetOutline`, `BackgroundColor`, `Font`, `SetProportional`, `ShowForPlayer`, `HideForPlayer`, `ShowForAll`, `HideForAll`, `SetString`.
+- Per-Player: `CreatePlayer`, `DestroyPlayer`, `ShowPlayer`, `HidePlayer`, `SetStringPlayer`, `LetterSizePlayer`, `TextSizePlayer`, `AlignmentPlayer`, `ColorPlayer`, `BoxColorPlayer`, `BackgroundColorPlayer`, `UseBoxPlayer`, `SetShadowPlayer`, `FontPlayer`, `SetOutlinePlayer`, `SetProportionalPlayer`.
+
+### 12. `FileSystemAPI` (`api->filesystem`)
+Sandbox-safe file I/O operations and directory manipulation.
+- `Open`, `Close`, `Read`, `Write`, `Seek`, `Tell`, `Flush`, `Eof`, `Size`, `Exists`, `Delete`, `DirExists`, `DirCreate`, `DirDelete`.
+
+### 13. `VariablesAPI` (`api->variables`)
+Server-wide key-value data storage.
+- `SetInt`, `SetString`, `SetFloat`, `GetInt`, `GetString`, `GetFloat`, `Delete`, `GetType`, `GetNameAtIndex`, `GetUpperIndex`.
+
+### 14. `WorldAPI` (`api->world`)
+Server environment, game settings, classes, ban/kick management, and utilities.
+- `SetWeather`, `GetWeather`, `SetWorldTime`, `GetWorldTime`, `SetGravity`, `GetGravity`, `GetTickCount`, `GetServerTickCount`, `GetServerTickRate`, `GetMaxPlayers`, `GetPlayerPoolSize`, `GetVehiclePoolSize`, `GetActorPoolSize`, `SetGameModeText`, `AddPlayerClass`, `AddPlayerClassEx`, `ShowNameTags`, `ShowPlayerMarkers`, `AllowInteriorWeapons`, `AllowAdminTeleport`, `EnableZoneNames`, `EnableTirePopping`, `UsePlayerPedAnims`, `DisableInteriorEnterExits`, `DisableVehicleMarkers`, `DisableNameTagLOS`, `SetNameTagDrawDistance`, `LimitGlobalChatRadius`, `LimitPlayerMarkerRadius`, `SetDeathDropAmount`, `GameModeExit`, `SetMaxRconLoginAttempt`, `GetWeaponName`, `FindWeaponId`, `GetVehicleName`, `FindVehicleModel`, `CreateExplosion`, `CreateExplosionForPlayer`, `SetDisabledWeapons`, `EnableStuntBonusForAll`, `EnableStuntBonusForPlayer`, `GetServerVarAsString`, `GetServerVarAsInt`, `GetServerVarAsBool`, `Kick`, `Ban`, `BanEx`, `RemoveBan`, `IsBanned`, `BlockIpAddress`, `UnblockIpAddress`.
+
+### 15. `TimersAPI` (`api->timers`)
+High-resolution server timers.
+- `SetTimer`, `KillTimer`.

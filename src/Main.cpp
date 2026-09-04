@@ -4,10 +4,12 @@
 
     Demonstrates:
     - Addon ABI initialization and version negotiation
-    - Exposing native C/C++ functions to Lua (with argument/return handling)
-    - Subscribing to existing server events (e.g., onPlayerConnect)
+    - Direct server subsystem APIs (PlayerAPI, MessagingAPI, WorldAPI, etc.)
+    - Exposing native C/C++ functions to Lua (with argument and return handling)
+    - Subscribing to server events (e.g., onPlayerConnect)
     - Dispatching custom addon events to the server's Lua event bus
-    - Invoking existing server Lua functions (e.g., sendClientMessage) via CallContext
+    - Invoking dynamic Lua functions via CallContext
+    - Setting global Lua constants and variables
     - Safe handle tracking and clean resource cleanup during unload
 */
 
@@ -27,70 +29,102 @@ static uint64_t g_HelloFuncHandle = 0;
 static uint64_t g_PlayerConnectEventHandle = 0;
 
 // =====================================================================
-// Invoking Existing Server Lua Functions
+// 1. Direct Server Subsystem API Example
 // =====================================================================
 
 /**
- * @brief Demonstrates calling the server's existing Lua function: sendClientMessage
+ * @brief Demonstrates calling direct server subsystem APIs (PlayerAPI and MessagingAPI).
  * 
- * Server Lua signature:
- *   sendClientMessage(playerId: integer, color: integer, message: string) -> boolean
+ * Legacy Server exposes 15 direct subsystem API tables on AddonAPI:
+ * - actor, player, vehicle, object, pickup, gangzone, label, menu,
+ *   messaging, netstats, textdraw, filesystem, variables, world, timers.
  * 
- * @param playerId Target player ID (0..MAX_PLAYERS-1)
- * @param color Hexadecimal RGBA/ARGB color code (e.g., 0x00FF00FF for green, 0xFFFFFFFF for white)
- * @param message The chat message string to send to the client
- * @return true if the function executed successfully and message was dispatched
+ * These interfaces provide zero-overhead direct function calls into the server core.
  */
-static bool CallSendClientMessage(int64_t playerId, int64_t color, const char* message)
+static void SendWelcomeMessage(int playerId)
 {
-    if (!g_API || !g_Addon || !message)
+    if (!g_API)
+    {
+        return;
+    }
+
+    // Direct access to PlayerAPI
+    const char* playerName = "Player";
+    if (g_API->player && g_API->player->IsConnected(playerId))
+    {
+        playerName = g_API->player->GetName(playerId);
+    }
+
+    // Construct greeting message
+    char welcomeMsg[256];
+    snprintf(welcomeMsg, sizeof(welcomeMsg), "Welcome to the server, %s! (Sent via direct MessagingAPI)", playerName);
+
+    // Direct access to MessagingAPI (Color: 0x00FF00FF RGBA green)
+    if (g_API->messaging)
+    {
+        g_API->messaging->SendClientMessage(playerId, 0x00FF00FF, welcomeMsg);
+    }
+}
+
+// =====================================================================
+// 2. Dynamic Lua Function Invocation Example (CallContext)
+// =====================================================================
+
+/**
+ * @brief Demonstrates calling any dynamic or script-defined Lua function using CallContext.
+ * 
+ * Use CallContext when you need to call a function defined in a Lua script or gamemode
+ * that is not part of the direct C subsystem tables.
+ * 
+ * @param functionName Global Lua function name to invoke (e.g. "OnCustomScriptAction")
+ * @param param Integer parameter to pass
+ * @return true if function executed without runtime errors
+ */
+static bool CallCustomLuaFunction(const char* functionName, int64_t param)
+{
+    if (!g_API || !g_Addon || !functionName)
     {
         return false;
     }
 
-    // 1. Begin dynamic call context for the existing server Lua function
-    CallContext* call = g_API->BeginCall(g_Addon, "sendClientMessage");
+    // 1. Begin dynamic call context
+    CallContext* call = g_API->BeginCall(g_Addon, functionName);
     if (!call)
     {
         return false;
     }
 
-    // 2. Push arguments in the exact order declared by the server's Lua registration:
-    //    Argument 0: playerId (integer)
-    //    Argument 1: color (integer)
-    //    Argument 2: message (string)
-    g_API->PushInteger(call, playerId);
-    g_API->PushInteger(call, color);
-    g_API->PushString(call, message);
+    // 2. Push arguments in exact order expected by the Lua function
+    g_API->PushInteger(call, param);
 
-    // 3. Execute the call protected by the server's Sol2/Lua engine
-    bool result = false;
+    // 3. Execute the call protected by the server's Lua engine
+    bool success = false;
     if (g_API->ExecuteCall(call))
     {
-        // 4. Retrieve return values if needed (sendClientMessage returns boolean)
+        // 4. Retrieve return values if any
         if (g_API->GetResultCount(call) > 0)
         {
-            result = g_API->GetResultBoolean(call, 0);
+            success = g_API->GetResultBoolean(call, 0);
         }
         else
         {
-            result = true;
+            success = true;
         }
     }
     else if (g_API->HasError(call))
     {
         char errBuffer[256];
-        snprintf(errBuffer, sizeof(errBuffer), "Error invoking sendClientMessage: %s", g_API->GetError(call));
+        snprintf(errBuffer, sizeof(errBuffer), "Error calling Lua function '%s': %s", functionName, g_API->GetError(call));
         g_API->Log(g_Addon, ADDON_LOG_WARN, errBuffer);
     }
 
-    // 5. Explicitly end and free the call context
+    // 5. Always end and release the call context
     g_API->EndCall(call);
-    return result;
+    return success;
 }
 
 // =====================================================================
-// Example Native Function Callback (Exposed to Lua)
+// 3. Example Native Function Callback (Exposed to Lua)
 // =====================================================================
 
 /**
@@ -107,6 +141,7 @@ static int HelloFunction(
     size_t maxResults,
     void* userData
 ) {
+    (void)userData;
     const char* targetName = "Developer";
 
     if (argumentCount > 0 && arguments[0].type == ADDON_VALUE_STRING && arguments[0].stringValue)
@@ -134,7 +169,7 @@ static int HelloFunction(
 }
 
 // =====================================================================
-// Example Server Event Callback (Listening to Server Events)
+// 4. Example Server Event Callback (Listening to Server Events)
 // =====================================================================
 
 /**
@@ -150,6 +185,9 @@ static void OnPlayerConnectHandler(
     size_t argumentCount,
     void* userData
 ) {
+    (void)eventName;
+    (void)userData;
+
     if (!g_API || !g_Addon)
     {
         return;
@@ -157,21 +195,21 @@ static void OnPlayerConnectHandler(
 
     if (argumentCount > 0 && (arguments[0].type == ADDON_VALUE_INTEGER || arguments[0].type == ADDON_VALUE_NUMBER))
     {
-        int64_t playerId = (arguments[0].type == ADDON_VALUE_INTEGER)
-            ? arguments[0].integerValue
-            : static_cast<int64_t>(arguments[0].numberValue);
+        int playerId = (arguments[0].type == ADDON_VALUE_INTEGER)
+            ? static_cast<int>(arguments[0].integerValue)
+            : static_cast<int>(arguments[0].numberValue);
 
         char logMsg[128];
-        snprintf(logMsg, sizeof(logMsg), "Player ID %lld connected to the server.", static_cast<long long>(playerId));
+        snprintf(logMsg, sizeof(logMsg), "Player ID %d connected to the server.", playerId);
         g_API->Log(g_Addon, ADDON_LOG_INFO, logMsg);
 
-        // Send a welcome message directly to the connecting player using sendClientMessage
-        CallSendClientMessage(playerId, 0x00FF00FF, "Welcome to the server! (Message sent from Native Addon)");
+        // Send a welcome message directly via subsystem API
+        SendWelcomeMessage(playerId);
     }
 }
 
 // =====================================================================
-// Addon Lifecycle Entry Points
+// 5. Addon Lifecycle Entry Points
 // =====================================================================
 
 /**
@@ -196,7 +234,12 @@ ADDON_EXPORT bool AddonMain(const AddonAPI* api, void* addon)
 
     g_API->Log(g_Addon, ADDON_LOG_INFO, "Initializing ExampleAddon...");
 
-    // 1. Register native function into the server's Lua runtime
+    // 1. Export global constants / variables into the server's Lua runtime
+    g_API->SetGlobalString(g_Addon, "EXAMPLE_ADDON_VERSION", "1.0.0");
+    g_API->SetGlobalInteger(g_Addon, "EXAMPLE_ADDON_LOADED", 1);
+    g_API->SetGlobalBoolean(g_Addon, "EXAMPLE_ADDON_ACTIVE", true);
+
+    // 2. Register native function into the server's Lua runtime
     g_HelloFuncHandle = g_API->RegisterFunction(g_Addon, "hello", HelloFunction, nullptr);
     if (!g_HelloFuncHandle)
     {
@@ -204,14 +247,14 @@ ADDON_EXPORT bool AddonMain(const AddonAPI* api, void* addon)
         return false;
     }
 
-    // 2. Register event listener for existing server event: onPlayerConnect
+    // 3. Register event listener for existing server event: onPlayerConnect
     g_PlayerConnectEventHandle = g_API->RegisterEvent(g_Addon, "onPlayerConnect", OnPlayerConnectHandler, nullptr);
     if (!g_PlayerConnectEventHandle)
     {
         g_API->Log(g_Addon, ADDON_LOG_WARN, "Failed to register event listener for 'onPlayerConnect'.");
     }
 
-    // 3. Trigger a custom addon event through the server's event bus
+    // 4. Trigger a custom addon event through the server's event bus
     Value readyArgs[1];
     readyArgs[0] = ValueString("ExampleAddon is ready.");
     g_API->TriggerEvent(g_Addon, "ExampleAddon.OnReady", readyArgs, 1);
