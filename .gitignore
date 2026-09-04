@@ -1,0 +1,43 @@
+# Build directories
+build/
+bin/
+out/
+
+# CMake artifacts
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+CMakeScripts/
+*.cmake
+!CMakeLists.txt
+
+# Visual Studio / MSBuild
+.vs/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.suo
+*.user
+
+# Compiler / Linker outputs
+*.obj
+*.o
+*.dll
+*.so
+*.dylib
+*.pdb
+*.idb
+*.exp
+*.lib
+*.ilk
+*.a
+
+# IDE & Editor metadata
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
