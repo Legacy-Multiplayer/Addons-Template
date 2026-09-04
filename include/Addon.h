@@ -376,35 +376,31 @@ typedef struct VehicleAPI {
 
 typedef struct ObjectAPI {
     int (*Create)(int modelId, float x, float y, float z, float rx, float ry, float rz, float drawDistance);
-    bool (*AttachToVehicle)(int objectId, int vehicleId, float offsetX, float offsetY, float offsetZ, float rx, float ry, float rz);
-    bool (*AttachToObject)(int objectId, int attachToObjectId, float offsetX, float offsetY, float offsetZ, float rx, float ry, float rz, bool syncRotation);
-    bool (*AttachToPlayer)(int objectId, int playerId, float offsetX, float offsetY, float offsetZ, float rx, float ry, float rz);
-    bool (*SetPos)(int objectId, float x, float y, float z);
-    bool (*GetPos)(int objectId, float* outX, float* outY, float* outZ);
-    bool (*SetRot)(int objectId, float rx, float ry, float rz);
-    bool (*GetRot)(int objectId, float* outRX, float* outRY, float* outRZ);
-    bool (*IsValid)(int objectId);
     bool (*Destroy)(int objectId);
-    int (*Move)(int objectId, float x, float y, float z, float speed, float rx, float ry, float rz);
+    bool (*IsValid)(int objectId);
+    int (*GetModel)(int objectId);
+    bool (*GetPos)(int objectId, float* outX, float* outY, float* outZ);
+    bool (*SetPos)(int objectId, float x, float y, float z);
+    bool (*GetRot)(int objectId, float* outRX, float* outRY, float* outRZ);
+    bool (*SetRot)(int objectId, float rx, float ry, float rz);
+    float (*Move)(int objectId, float x, float y, float z, float speed);
     bool (*Stop)(int objectId);
     bool (*IsMoving)(int objectId);
-    bool (*SetMaterial)(int objectId, int materialIndex, int modelId, const char* txdName, const char* textureName, uint32_t materialColor);
-    bool (*SetMaterialText)(int objectId, const char* text, int materialIndex, int materialSize, const char* fontFace, int fontSize, bool bold, uint32_t fontColor, uint32_t backColor, int textAlignment);
+    bool (*SetScale)(int objectId, float scale);
+    bool (*AttachToPlayer)(int objectId, int playerId, float offsetX, float offsetY, float offsetZ, float rx, float ry, float rz);
 
     int (*CreatePlayer)(int playerId, int modelId, float x, float y, float z, float rx, float ry, float rz, float drawDistance);
     bool (*DestroyPlayer)(int playerId, int objectId);
     bool (*IsValidPlayer)(int playerId, int objectId);
-    bool (*SetPlayerPos)(int playerId, int objectId, float x, float y, float z);
+    int (*GetPlayerModel)(int playerId, int objectId);
     bool (*GetPlayerPos)(int playerId, int objectId, float* outX, float* outY, float* outZ);
-    bool (*SetPlayerRot)(int playerId, int objectId, float rx, float ry, float rz);
+    bool (*SetPlayerPos)(int playerId, int objectId, float x, float y, float z);
     bool (*GetPlayerRot)(int playerId, int objectId, float* outRX, float* outRY, float* outRZ);
-    int (*MovePlayer)(int playerId, int objectId, float x, float y, float z, float speed, float rx, float ry, float rz);
+    bool (*SetPlayerRot)(int playerId, int objectId, float rx, float ry, float rz);
+    float (*MovePlayer)(int playerId, int objectId, float x, float y, float z, float speed);
     bool (*StopPlayer)(int playerId, int objectId);
     bool (*IsPlayerMoving)(int playerId, int objectId);
     bool (*AttachPlayerToPlayer)(int playerId, int objectId, int attachToPlayerId, float offsetX, float offsetY, float offsetZ, float rx, float ry, float rz);
-    bool (*AttachPlayerToVehicle)(int playerId, int objectId, int vehicleId, float offsetX, float offsetY, float offsetZ, float rx, float ry, float rz);
-    bool (*SetPlayerMaterial)(int playerId, int objectId, int materialIndex, int modelId, const char* txdName, const char* textureName, uint32_t materialColor);
-    bool (*SetPlayerMaterialText)(int playerId, int objectId, const char* text, int materialIndex, int materialSize, const char* fontFace, int fontSize, bool bold, uint32_t fontColor, uint32_t backColor, int textAlignment);
 } ObjectAPI;
 
 typedef struct PickupAPI {
