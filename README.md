@@ -43,9 +43,9 @@ Legacy-Server-Addon-Template/
 
 ## 3. Quickstart: Building & Installation
 
-### Windows (PowerShell / Command Prompt):
+### Windows (PowerShell / Command Prompt - 32-bit x86):
 ```powershell
-cmake -S . -B build
+cmake -S . -B build -A Win32 -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release --parallel
 ```
 Output: `build/Release/ExampleAddon.dll`

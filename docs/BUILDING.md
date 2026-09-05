@@ -16,13 +16,15 @@ This guide explains how to compile native addons from source on Windows and Linu
 
 ---
 
-## 2. Building on Windows
+## 2. Building on Windows (x86 32-bit)
+
+Native addons must be built as **32-bit (x86)** to match Legacy Server and the SA-MP client.
 
 Open **Developer PowerShell for VS 2022** (or Command Prompt) and run:
 
 ```powershell
-# 1. Configure the CMake build system
-cmake -S . -B build
+# 1. Configure the CMake build system for 32-bit (Win32)
+cmake -S . -B build -A Win32 -DCMAKE_BUILD_TYPE=Release
 
 # 2. Compile the shared library (Release mode)
 cmake --build build --config Release --parallel

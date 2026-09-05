@@ -1,5 +1,16 @@
 cmake_minimum_required(VERSION 3.15)
+
+# Default to 32-bit (Win32) generator platform on Windows if not specified
+if(WIN32 AND NOT DEFINED CMAKE_GENERATOR_PLATFORM)
+    set(CMAKE_GENERATOR_PLATFORM "Win32" CACHE STRING "Target architecture" FORCE)
+endif()
+
 project(ExampleAddon VERSION 1.0.0 LANGUAGES CXX)
+
+# Enforce 32-bit (x86) architecture to match Legacy Server
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    message(FATAL_ERROR "Legacy Addon must be compiled for 32-bit (x86) to match the server! Please configure with: cmake -B build -A Win32 (or delete the existing build directory and reconfigure)")
+endif()
 
 # =====================================================================
 # C++ Standard Configuration
@@ -42,10 +53,14 @@ if(MSVC)
     )
 else()
     target_compile_options(${PROJECT_NAME} PRIVATE
+        -m32
         -Wall
         -Wextra
         -fPIC
         -fvisibility=hidden
+    )
+    target_link_options(${PROJECT_NAME} PRIVATE
+        -m32
     )
 endif()
 
