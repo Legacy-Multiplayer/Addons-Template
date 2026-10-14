@@ -35,9 +35,9 @@ static uint64_t g_PlayerConnectEventHandle = 0;
 /**
  * @brief Demonstrates calling direct server subsystem APIs (PlayerAPI and MessagingAPI).
  * 
- * Legacy Server exposes 15 direct subsystem API tables on AddonAPI:
+ * Legacy Server exposes 13 direct subsystem API tables on AddonAPI:
  * - actor, player, vehicle, object, pickup, gangzone, label, menu,
- *   messaging, netstats, textdraw, filesystem, variables, world, timers.
+ *   messaging, netstats, filesystem, world, timers.
  * 
  * These interfaces provide zero-overhead direct function calls into the server core.
  */

@@ -15,7 +15,7 @@ Legacy-Server-Addon-Template/
 ├── LICENSE                     # MIT license
 │
 ├── include/
-│   └── Addon.h                 # Public Addon SDK & C ABI specification (15 subsystems)
+│   └── Addon.h                 # Public Addon SDK & C ABI specification (13 subsystems)
 │
 ├── src/
 │   └── Main.cpp                # Addon entry points & example implementation
@@ -91,9 +91,9 @@ Every addon exports two standard functions:
 
 ## 5. Main Features Demonstrated
 
-### 1. Direct Server Subsystem APIs (15 Subsystems)
-Addons have direct zero-overhead access to 15 core server subsystems:
-`actor`, `player`, `vehicle`, `object`, `pickup`, `gangzone`, `label`, `menu`, `messaging`, `netstats`, `textdraw`, `filesystem`, `variables`, `world`, `timers`.
+### 1. Direct Server Subsystem APIs (13 Subsystems)
+Addons have direct access to the 13 subsystem tables in `AddonAPI` v5:
+`actor`, `player`, `vehicle`, `object`, `pickup`, `gangzone`, `label`, `menu`, `messaging`, `netstats`, `filesystem`, `world`, and `timers`.
 
 ```cpp
 if (api->player && api->player->IsConnected(playerId))
@@ -192,7 +192,7 @@ api->RegisterEvent(addon, "onPlayerConnect", OnPlayerConnectHandler, nullptr);
 
 ## 7. Documentation Index
 
-- [**API Reference**](docs/API.md): Full technical specification of all 15 subsystems, types, functions, and callbacks.
+- [**API Reference**](docs/API.md): Full technical specification of all 13 subsystems, types, functions, and callbacks.
 - [**Building Guide**](docs/BUILDING.md): Detailed compilation instructions for Windows and Linux.
 - [**Development Guide**](docs/DEVELOPMENT.md): Guide for creating and customizing new native addons.
 

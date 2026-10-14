@@ -11,7 +11,7 @@
     #define ADDON_EXPORT extern "C" __attribute__((visibility("default")))
 #endif
 
-#define ADDON_API_VERSION 3
+#define ADDON_API_VERSION 5
 
 #ifdef __cplusplus
 extern "C" {
@@ -208,10 +208,7 @@ typedef struct PlayerAPI {
     bool (*IsNPC)(int playerId);
     bool (*IsAdmin)(int playerId);
     int (*GetCount)(void);
-    int (*GetPoolSize)(void);
     int (*GetIdFromName)(const char* name);
-    const char* (*GetVersion)(int playerId);
-    const char* (*GetGPCI)(int playerId);
     bool (*IsInRangeOfPoint)(int playerId, float range, float x, float y, float z);
     float (*GetDistanceFromPoint)(int playerId, float x, float y, float z);
     bool (*IsPickupStreamedIn)(int pickupId, int playerId);
@@ -256,7 +253,6 @@ typedef struct PlayerAPI {
     bool (*ShowNameTagForPlayer)(int playerId, int showPlayerId, bool show);
     bool (*SetMapIcon)(int playerId, int iconId, float x, float y, float z, int markerType, uint32_t color, int style);
     bool (*RemoveMapIcon)(int playerId, int iconId);
-    bool (*AllowTeleport)(int playerId, bool allow);
     bool (*SetCameraPos)(int playerId, float x, float y, float z, float rx, float ry, float rz);
     bool (*SetCameraLookAt)(int playerId, float x, float y, float z, int cut);
     bool (*SetCameraBehindPlayer)(int playerId);
@@ -274,8 +270,6 @@ typedef struct PlayerAPI {
     bool (*InterpolateCameraLookAt)(int playerId, float fromX, float fromY, float fromZ, float toX, float toY, float toZ, int time, int cut);
     bool (*SetBlurLevel)(int playerId, int blurLevel);
     int (*SetGameSpeed)(int playerId, float speed);
-    bool (*SendClientCheck)(int playerId, int type, uint32_t address, uint16_t offset, uint16_t count);
-    bool (*ToggleChatbox)(int playerId, bool show);
     bool (*ToggleWidescreen)(int playerId, bool on);
     bool (*SetShopName)(int playerId, const char* shopName);
     bool (*PlayAudioStream)(int playerId, const char* url, float posX, float posY, float posZ, float distance, bool usePos);
@@ -288,17 +282,6 @@ typedef struct PlayerAPI {
     bool (*SetAdmin)(int playerId, bool admin);
     bool (*CreatePlayerPickup)(int pickupId, int playerId, int model, int type, float x, float y, float z);
     bool (*DestroyPlayerPickup)(int pickupId, int playerId);
-
-    bool (*SetPVarInt)(int playerId, const char* name, int value);
-    bool (*SetPVarString)(int playerId, const char* name, const char* value);
-    bool (*SetPVarFloat)(int playerId, const char* name, float value);
-    int (*GetPVarInt)(int playerId, const char* name);
-    const char* (*GetPVarString)(int playerId, const char* name);
-    float (*GetPVarFloat)(int playerId, const char* name);
-    bool (*DeletePVar)(int playerId, const char* name);
-    int (*GetPVarType)(int playerId, const char* name);
-    const char* (*GetPVarNameAtIndex)(int playerId, int index);
-    int (*GetPVarsUpperIndex)(int playerId);
 } PlayerAPI;
 
 typedef struct VehicleAPI {
@@ -369,7 +352,6 @@ typedef struct VehicleAPI {
     int (*GetParamsSirenState)(int vehicleId);
     bool (*GetRotationQuat)(int vehicleId, float* outW, float* outX, float* outY, float* outZ);
     float (*GetDistanceFromPoint)(int vehicleId, float x, float y, float z);
-    int (*GetPoolSize)(void);
     int (*GetModelCount)(int modelId);
     int (*GetModelsUsed)(void);
 } VehicleAPI;
@@ -414,7 +396,6 @@ typedef struct PickupAPI {
     int (*GetModel)(int pickupId);
     int (*GetType)(int pickupId);
     int (*GetCount)(void);
-    int (*GetPoolSize)(void);
     int (*GetVirtualWorld)(int pickupId);
 } PickupAPI;
 
@@ -483,45 +464,6 @@ typedef struct NetStatsAPI {
     const char* (*GetIpPort)(int playerId);
 } NetStatsAPI;
 
-typedef struct TextDrawAPI {
-    int (*Create)(float x, float y, const char* text);
-    bool (*Destroy)(int id);
-    bool (*IsValid)(int id);
-    bool (*LetterSize)(int id, float x, float y);
-    bool (*TextSize)(int id, float x, float y);
-    bool (*Alignment)(int id, int alignment);
-    bool (*Color)(int id, uint32_t color);
-    bool (*UseBox)(int id, bool use);
-    bool (*BoxColor)(int id, uint32_t color);
-    bool (*SetShadow)(int id, int size);
-    bool (*SetOutline)(int id, int size);
-    bool (*BackgroundColor)(int id, uint32_t color);
-    bool (*Font)(int id, int font);
-    bool (*SetProportional)(int id, bool set);
-    bool (*ShowForPlayer)(int playerId, int id);
-    bool (*HideForPlayer)(int playerId, int id);
-    bool (*ShowForAll)(int id);
-    bool (*HideForAll)(int id);
-    bool (*SetString)(int id, const char* text);
-
-    int (*CreatePlayer)(int playerId, float x, float y, const char* text);
-    bool (*DestroyPlayer)(int playerId, int id);
-    bool (*ShowPlayer)(int playerId, int id);
-    bool (*HidePlayer)(int playerId, int id);
-    bool (*SetStringPlayer)(int playerId, int id, const char* text);
-    bool (*LetterSizePlayer)(int playerId, int id, float x, float y);
-    bool (*TextSizePlayer)(int playerId, int id, float x, float y);
-    bool (*AlignmentPlayer)(int playerId, int id, int alignment);
-    bool (*ColorPlayer)(int playerId, int id, uint32_t color);
-    bool (*BoxColorPlayer)(int playerId, int id, uint32_t color);
-    bool (*BackgroundColorPlayer)(int playerId, int id, uint32_t color);
-    bool (*UseBoxPlayer)(int playerId, int id, bool use);
-    bool (*SetShadowPlayer)(int playerId, int id, int size);
-    bool (*FontPlayer)(int playerId, int id, int font);
-    bool (*SetOutlinePlayer)(int playerId, int id, int size);
-    bool (*SetProportionalPlayer)(int playerId, int id, bool set);
-} TextDrawAPI;
-
 typedef struct FileSystemAPI {
     int (*Open)(const char* path, const char* mode);
     bool (*Close)(int handle);
@@ -539,19 +481,6 @@ typedef struct FileSystemAPI {
     bool (*DirDelete)(const char* path);
 } FileSystemAPI;
 
-typedef struct VariablesAPI {
-    bool (*SetInt)(const char* name, int value);
-    bool (*SetString)(const char* name, const char* value);
-    bool (*SetFloat)(const char* name, float value);
-    int (*GetInt)(const char* name);
-    const char* (*GetString)(const char* name);
-    float (*GetFloat)(const char* name);
-    bool (*Delete)(const char* name);
-    int (*GetType)(const char* name);
-    const char* (*GetNameAtIndex)(int index);
-    int (*GetUpperIndex)(void);
-} VariablesAPI;
-
 typedef struct WorldAPI {
     bool (*SetWeather)(int weatherId);
     int (*GetWeather)(void);
@@ -562,17 +491,9 @@ typedef struct WorldAPI {
     int (*GetTickCount)(void);
     int (*GetServerTickCount)(void);
     int (*GetServerTickRate)(void);
-    int (*GetMaxPlayers)(void);
-    int (*GetPlayerPoolSize)(void);
-    int (*GetVehiclePoolSize)(void);
-    int (*GetActorPoolSize)(void);
     bool (*SetGameModeText)(const char* text);
-    int (*AddPlayerClass)(int skinId, float x, float y, float z, float a, int weapon1, int ammo1, int weapon2, int ammo2, int weapon3, int ammo3);
-    int (*AddPlayerClassEx)(int teamId, int skinId, float x, float y, float z, float a, int weapon1, int ammo1, int weapon2, int ammo2, int weapon3, int ammo3);
     bool (*ShowNameTags)(bool show);
     bool (*ShowPlayerMarkers)(bool show);
-    bool (*AllowInteriorWeapons)(bool allow);
-    bool (*AllowAdminTeleport)(bool allow);
     bool (*EnableZoneNames)(bool enable);
     bool (*EnableTirePopping)(bool enable);
     bool (*UsePlayerPedAnims)(void);
@@ -584,7 +505,6 @@ typedef struct WorldAPI {
     bool (*LimitPlayerMarkerRadius)(float radius);
     bool (*SetDeathDropAmount)(int amount);
     bool (*GameModeExit)(void);
-    bool (*SetMaxRconLoginAttempt)(int maxAttempt);
     const char* (*GetWeaponName)(int weaponId);
     int (*FindWeaponId)(const char* name);
     const char* (*GetVehicleName)(int modelId);
@@ -594,9 +514,6 @@ typedef struct WorldAPI {
     bool (*SetDisabledWeapons)(const int* weaponIds, size_t count);
     bool (*EnableStuntBonusForAll)(bool enable);
     bool (*EnableStuntBonusForPlayer)(int playerId, bool enable);
-    const char* (*GetServerVarAsString)(const char* name);
-    int (*GetServerVarAsInt)(const char* name);
-    bool (*GetServerVarAsBool)(const char* name);
     bool (*Kick)(int playerId);
     bool (*Ban)(int playerId);
     bool (*BanEx)(int playerId, const char* reason);
@@ -676,9 +593,7 @@ typedef struct AddonAPI {
     const MenuAPI* menu;
     const MessagingAPI* messaging;
     const NetStatsAPI* netstats;
-    const TextDrawAPI* textdraw;
     const FileSystemAPI* filesystem;
-    const VariablesAPI* variables;
     const WorldAPI* world;
     const TimersAPI* timers;
 } AddonAPI;
@@ -687,6 +602,7 @@ typedef struct AddonAPI {
 // Addon Entry Point Types
 // =====================================================================
 
+typedef uint32_t (*AddonGetApiVersionFunction)(void);
 typedef bool (*AddonMainFunction)(const AddonAPI* api, void* addon);
 typedef void (*AddonUnloadFunction)(void);
 

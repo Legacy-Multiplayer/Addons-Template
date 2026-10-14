@@ -6,10 +6,10 @@ This document provides the complete technical specification for the Legacy Serve
 
 ## 1. Overview & Architecture
 
-Legacy Server native addons are dynamic shared libraries (`.dll` on Windows, `.so` on Linux) loaded directly into the server process. Addons interact with the server through a versioned, C-compatible function table (`AddonAPI`) and lightweight, ABI-safe data structures (`Value`, `CallContext`, `Vector3`, `Vector4`).
+Legacy Server native addons are dynamic shared libraries (`.dll` on Windows, `.so` on Linux) loaded directly into the server process. Addons interact with the server through a versioned (current ABI v5), C-compatible function table (`AddonAPI`) and lightweight, ABI-safe data structures (`Value`, `CallContext`, `Vector3`, `Vector4`).
 
 ### Key Principles:
-- **Direct Subsystem Performance**: 15 direct server subsystem API tables provide zero-overhead native function calls into the server core (Players, Vehicles, Objects, Messaging, World, etc.).
+- **Direct Subsystem Performance**: 13 direct server subsystem API tables provide native access to the server core (Players, Vehicles, Objects, Messaging, World, etc.).
 - **Dynamic Invocations**: The addon can call any Lua script function dynamically using the `CallContext` builder pattern.
 - **Global Lua Exports**: Addons can export typed global constants (`SetGlobalInteger`, `SetGlobalString`, etc.) directly into the Lua state.
 - **ABI Stability**: No C++ standard library structures (`std::string`, `std::vector`) cross the ABI boundary.
@@ -215,71 +215,58 @@ ADDON_EXPORT void AddonUnload(void);
 
 ---
 
-## 6. Server Subsystem APIs (15 Subsystems)
+## 6. Server Subsystem APIs (13 Subsystems)
 
-The `AddonAPI` provides direct function pointers to the core server subsystems:
+These tables match the current `include/Addon.h` ABI. The function names below are the members exposed by each table.
 
 ### 1. `ActorAPI` (`api->actor`)
-Controls server-side static NPC actors.
-- `Create`, `Destroy`, `IsValid`, `SetPosition`, `GetPosition`, `SetFacingAngle`, `GetFacingAngle`, `SetHealth`, `GetHealth`, `SetInvulnerable`, `IsInvulnerable`, `SetVirtualWorld`, `GetVirtualWorld`, `ApplyAnimation`, `ClearAnimations`.
+
+- Create, Destroy, IsValid, SetPosition, GetPosition, SetFacingAngle, GetFacingAngle, SetHealth, GetHealth, SetInvulnerable, IsInvulnerable, SetVirtualWorld, GetVirtualWorld, ApplyAnimation, ClearAnimations.
 
 ### 2. `PlayerAPI` (`api->player`)
-Comprehensive player state queries and manipulation.
-- Queries: `IsConnected`, `GetName`, `GetIp`, `GetPosition`, `GetVelocity`, `GetCameraPosition`, `GetCameraFrontVector`, `GetWorldBounds`, `GetKeys`, `GetTime`, `GetWeaponData`, `GetHealth`, `GetArmour`, `GetFacingAngle`, `GetPing`, `GetScore`, `GetMoney`, `GetSkin`, `GetColor`, `GetInterior`, `GetVirtualWorld`, `GetState`, `GetVehicleId`, `GetWeapon`, `GetAmmo`, `GetWantedLevel`, `GetSpecialAction`, `GetDrunkLevel`, `GetCount`, `GetPoolSize`, `GetIdFromName`, `GetVersion`, `GetGPCI`, `IsInRangeOfPoint`, `GetDistanceFromPoint`, `IsInVehicle`, `IsInAnyVehicle`, `IsNPC`, `IsAdmin`.
-- Actions: `SetSpawnInfo`, `Spawn`, `ForceClassSelection`, `SetPosition`, `SetPositionFindZ`, `SetHealth`, `SetArmour`, `SetFacingAngle`, `SetInterior`, `SetVelocity`, `SetSkin`, `SetTeam`, `SetColor`, `SetVirtualWorld`, `SetTime`, `SetScore`, `GiveMoney`, `SetMoney`, `ResetMoney`, `SetName`, `SetDrunkLevel`, `SetWantedLevel`, `PutInVehicle`, `RemoveFromVehicle`, `ToggleControllable`, `PlaySound`, `ApplyAnimation`, `ClearAnimations`, `SetSpecialAction`, `SetCheckpoint`, `DisableCheckpoint`, `SetRaceCheckpoint`, `DisableRaceCheckpoint`, `SetWorldBounds`, `ClearWorldBounds`, `SetMarkerForPlayer`, `ShowNameTagForPlayer`, `SetMapIcon`, `RemoveMapIcon`, `AllowTeleport`, `SetCameraPos`, `SetCameraLookAt`, `SetCameraBehindPlayer`, `ToggleSpectating`, `SpectatePlayer`, `SpectateVehicle`, `SetAmmo`, `GiveWeapon`, `ResetWeapons`, `SetSkillLevel`, `SetArmedWeapon`, `SetFightingStyle`, `SetMaxHealth`, `InterpolateCameraPos`, `InterpolateCameraLookAt`, `SetBlurLevel`, `SetGameSpeed`, `SendClientCheck`, `ToggleChatbox`, `ToggleWidescreen`, `SetShopName`, `PlayAudioStream`, `StopAudioStream`, `PlayCrimeReport`, `DisableRemoteVehicleCollisions`, `SetChatBubble`, `SetWeather`, `ToggleClock`, `SetAdmin`, `CreatePlayerPickup`, `DestroyPlayerPickup`.
-- Player Variables (PVars): `SetPVarInt`, `SetPVarString`, `SetPVarFloat`, `GetPVarInt`, `GetPVarString`, `GetPVarFloat`, `DeletePVar`, `GetPVarType`, `GetPVarNameAtIndex`, `GetPVarsUpperIndex`.
+
+- IsConnected, GetName, GetIp, GetPosition, GetVelocity, GetCameraPosition, GetCameraFrontVector, GetWorldBounds, GetKeys, GetTime, GetWeaponData, GetHealth, GetArmour, GetFacingAngle, GetPing, GetCameraZoom, GetCameraAspectRatio, GetTeam, GetSkin, GetColor, GetInterior, GetVirtualWorld, GetState, GetVehicleId, GetScore, GetMoney, GetWeapon, GetAmmo, GetWantedLevel, GetSpecialAction, GetDrunkLevel, GetTargetPlayer, GetTargetActor, GetCameraMode, GetVehicleSeat, GetFightingStyle, GetFightingMove, GetWeaponState, GetSurfingVehicleId, IsInCheckpoint, IsInRaceCheckpoint, IsInVehicle, IsInAnyVehicle, IsTyping, IsNPC, IsAdmin, GetCount, GetIdFromName, IsInRangeOfPoint, GetDistanceFromPoint, IsPickupStreamedIn, IsActorStreamedIn, SetSpawnInfo, Spawn, ForceClassSelection, SetPosition, SetPositionFindZ, SetHealth, SetArmour, SetFacingAngle, SetInterior, SetVelocity, SetSkin, SetTeam, SetColor, SetVirtualWorld, SetTime, SetScore, GiveMoney, SetMoney, ResetMoney, SetName, SetDrunkLevel, SetWantedLevel, PutInVehicle, RemoveFromVehicle, ToggleControllable, PlaySound, ApplyAnimation, ClearAnimations, SetSpecialAction, SetCheckpoint, DisableCheckpoint, SetRaceCheckpoint, DisableRaceCheckpoint, SetWorldBounds, ClearWorldBounds, SetMarkerForPlayer, ShowNameTagForPlayer, SetMapIcon, RemoveMapIcon, SetCameraPos, SetCameraLookAt, SetCameraBehindPlayer, ToggleSpectating, SpectatePlayer, SpectateVehicle, SetAmmo, GiveWeapon, ResetWeapons, SetSkillLevel, SetArmedWeapon, SetFightingStyle, SetMaxHealth, InterpolateCameraPos, InterpolateCameraLookAt, SetBlurLevel, SetGameSpeed, ToggleWidescreen, SetShopName, PlayAudioStream, StopAudioStream, PlayCrimeReport, DisableRemoteVehicleCollisions, SetChatBubble, SetWeather, ToggleClock, SetAdmin, CreatePlayerPickup, DestroyPlayerPickup.
 
 ### 3. `VehicleAPI` (`api->vehicle`)
-Vehicle creation, properties, components, damage, and synchronization.
-- `Create`, `AddStatic`, `AddStaticEx`, `Destroy`, `IsValid`, `GetModel`, `GetInterior`, `LinkToInterior`, `GetPosition`, `SetPosition`, `GetZAngle`, `SetZAngle`, `GetHealth`, `SetHealth`, `SetToRespawn`, `GetColor`, `ChangeColor`, `ChangePaintjob`, `GetPaintjob`, `SetNumberPlate`, `GetNumberPlate`, `AttachTrailer`, `DetachTrailer`, `IsTrailerAttached`, `GetTrailer`, `SetVirtualWorld`, `GetVirtualWorld`, `GetVelocity`, `SetVelocity`, `SetAngularVelocity`, `IsOnItsSide`, `IsUpsideDown`, `GetSirenState`, `IsWrecked`, `IsSunked`, `GetRespawnDelay`, `SetRespawnDelay`, `GetDamageStatus`, `UpdateDamageStatus`, `SetParamsForPlayer`, `ManualEngineAndLights`, `Repair`, `Explode`, `SetParamsCarDoors`, `GetParamsCarDoors`, `SetParamsCarWindows`, `GetParamsCarWindows`, `ToggleTaxiLight`, `SetEngineState`, `SetLightState`, `SetFeature`, `SetVisibility`, `SetHoodState`, `SetTrunkState`, `SetDoorState`, `GetSpawnInfo`, `SetSpawnInfo`, `GetSpawnPos`, `SetSpawnPos`, `GetComponentInSlot`, `GetComponentType`, `AddComponent`, `RemoveComponent`, `GetModelInfo`, `GetParamsSirenState`, `GetRotationQuat`, `GetDistanceFromPoint`, `GetPoolSize`, `GetModelCount`, `GetModelsUsed`.
+
+- Create, AddStatic, AddStaticEx, Destroy, IsValid, GetModel, GetInterior, LinkToInterior, GetPosition, SetPosition, GetZAngle, SetZAngle, GetHealth, SetHealth, SetToRespawn, GetColor, ChangeColor, ChangePaintjob, GetPaintjob, SetNumberPlate, GetNumberPlate, AttachTrailer, DetachTrailer, IsTrailerAttached, GetTrailer, SetVirtualWorld, GetVirtualWorld, GetVelocity, SetVelocity, SetAngularVelocity, IsOnItsSide, IsUpsideDown, GetSirenState, IsWrecked, IsSunked, GetRespawnDelay, SetRespawnDelay, GetDamageStatus, UpdateDamageStatus, SetParamsForPlayer, ManualEngineAndLights, Repair, Explode, SetParamsCarDoors, GetParamsCarDoors, SetParamsCarWindows, GetParamsCarWindows, ToggleTaxiLight, SetEngineState, SetLightState, SetFeature, SetVisibility, SetHoodState, SetTrunkState, SetDoorState, GetSpawnInfo, SetSpawnInfo, GetSpawnPos, SetSpawnPos, GetComponentInSlot, GetComponentType, AddComponent, RemoveComponent, GetModelInfo, GetParamsSirenState, GetRotationQuat, GetDistanceFromPoint, GetModelCount, GetModelsUsed.
 
 ### 4. `ObjectAPI` (`api->object`)
-Global and per-player dynamic world objects, materials, and attachments.
-- Global: `Create`, `AttachToVehicle`, `AttachToObject`, `AttachToPlayer`, `SetPos`, `GetPos`, `SetRot`, `GetRot`, `IsValid`, `Destroy`, `Move`, `Stop`, `IsMoving`, `SetMaterial`, `SetMaterialText`.
-- Per-Player: `CreatePlayer`, `DestroyPlayer`, `IsValidPlayer`, `SetPlayerPos`, `GetPlayerPos`, `SetPlayerRot`, `GetPlayerRot`, `MovePlayer`, `StopPlayer`, `IsPlayerMoving`, `AttachPlayerToPlayer`, `AttachPlayerToVehicle`, `SetPlayerMaterial`, `SetPlayerMaterialText`.
+
+- Create, Destroy, IsValid, GetModel, GetPos, SetPos, GetRot, SetRot, Move, Stop, IsMoving, SetScale, AttachToPlayer, CreatePlayer, DestroyPlayer, IsValidPlayer, GetPlayerModel, GetPlayerPos, SetPlayerPos, GetPlayerRot, SetPlayerRot, MovePlayer, StopPlayer, IsPlayerMoving, AttachPlayerToPlayer.
 
 ### 5. `PickupAPI` (`api->pickup`)
-World pickups and static pickups.
-- `Create`, `AddStatic`, `Destroy`, `DestroyAll`, `IsValid`, `IsStatic`, `GetPosition`, `GetModel`, `GetType`, `GetCount`, `GetPoolSize`, `GetVirtualWorld`.
+
+- Create, AddStatic, Destroy, DestroyAll, IsValid, IsStatic, GetPosition, GetModel, GetType, GetCount, GetVirtualWorld.
 
 ### 6. `GangZoneAPI` (`api->gangzone`)
-Radar gang zones, coloring, and flashing.
-- `Create`, `Destroy`, `ShowForPlayer`, `ShowForAll`, `HideForPlayer`, `HideForAll`, `FlashForPlayer`, `FlashForAll`, `StopFlashForPlayer`, `StopFlashForAll`, `IsValid`.
+
+- Create, Destroy, ShowForPlayer, ShowForAll, HideForPlayer, HideForAll, FlashForPlayer, FlashForAll, StopFlashForPlayer, StopFlashForAll, IsValid.
 
 ### 7. `LabelAPI` (`api->label`)
-Global and per-player 3D text labels.
-- Global: `Create3DText`, `Delete3DText`, `Attach3DTextToPlayer`, `Attach3DTextToVehicle`, `Update3DText`, `IsValid3DText`.
-- Per-Player: `CreatePlayer3DText`, `DeletePlayer3DText`, `UpdatePlayer3DText`, `IsValidPlayer3DText`.
+
+- Create3DText, Delete3DText, Attach3DTextToPlayer, Attach3DTextToVehicle, Update3DText, CreatePlayer3DText, DeletePlayer3DText, UpdatePlayer3DText, IsValid3DText, IsValidPlayer3DText.
 
 ### 8. `MenuAPI` (`api->menu`)
-In-game text menus.
-- `Create`, `Destroy`, `AddItem`, `SetColumnHeader`, `ShowForPlayer`, `HideForPlayer`, `IsValid`, `Disable`, `DisableRow`, `GetPlayerMenu`.
+
+- Create, Destroy, AddItem, SetColumnHeader, ShowForPlayer, HideForPlayer, IsValid, Disable, DisableRow, GetPlayerMenu.
 
 ### 9. `MessagingAPI` (`api->messaging`)
-Chat, system messages, death messages, and game texts.
-- `SendClientMessage`, `SendClientMessageToAll`, `SendPlayerMessageToPlayer`, `SendPlayerMessageToAll`, `SendDeathMessage`, `SendDeathMessageToPlayer`, `GameTextForAll`, `GameTextForPlayer`.
+
+- SendClientMessage, SendClientMessageToAll, SendPlayerMessageToPlayer, SendPlayerMessageToAll, SendDeathMessage, SendDeathMessageToPlayer, GameTextForAll, GameTextForPlayer.
 
 ### 10. `NetStatsAPI` (`api->netstats`)
-RakNet network statistics and telemetry.
-- `GetNetworkStats`, `GetPlayerNetworkStats`, `GetBytesReceived`, `GetBytesSent`, `GetMessagesReceived`, `GetMessagesSent`, `GetMessagesRecvPerSecond`, `GetPacketLossPercent`, `GetConnectionStatus`, `GetConnectedTime`, `GetIpPort`.
 
-### 11. `TextDrawAPI` (`api->textdraw`)
-Global and per-player GUI textdraws, fonts, shadows, and boxes.
-- Global: `Create`, `Destroy`, `IsValid`, `LetterSize`, `TextSize`, `Alignment`, `Color`, `UseBox`, `BoxColor`, `SetShadow`, `SetOutline`, `BackgroundColor`, `Font`, `SetProportional`, `ShowForPlayer`, `HideForPlayer`, `ShowForAll`, `HideForAll`, `SetString`.
-- Per-Player: `CreatePlayer`, `DestroyPlayer`, `ShowPlayer`, `HidePlayer`, `SetStringPlayer`, `LetterSizePlayer`, `TextSizePlayer`, `AlignmentPlayer`, `ColorPlayer`, `BoxColorPlayer`, `BackgroundColorPlayer`, `UseBoxPlayer`, `SetShadowPlayer`, `FontPlayer`, `SetOutlinePlayer`, `SetProportionalPlayer`.
+- GetNetworkStats, GetPlayerNetworkStats, GetBytesReceived, GetBytesSent, GetMessagesReceived, GetMessagesSent, GetMessagesRecvPerSecond, GetPacketLossPercent, GetConnectionStatus, GetConnectedTime, GetIpPort.
 
-### 12. `FileSystemAPI` (`api->filesystem`)
-Sandbox-safe file I/O operations and directory manipulation.
-- `Open`, `Close`, `Read`, `Write`, `Seek`, `Tell`, `Flush`, `Eof`, `Size`, `Exists`, `Delete`, `DirExists`, `DirCreate`, `DirDelete`.
+### 11. `FileSystemAPI` (`api->filesystem`)
 
-### 13. `VariablesAPI` (`api->variables`)
-Server-wide key-value data storage.
-- `SetInt`, `SetString`, `SetFloat`, `GetInt`, `GetString`, `GetFloat`, `Delete`, `GetType`, `GetNameAtIndex`, `GetUpperIndex`.
+- Open, Close, Read, Write, Seek, Tell, Flush, Eof, Size, Exists, Delete, DirExists, DirCreate, DirDelete.
 
-### 14. `WorldAPI` (`api->world`)
-Server environment, game settings, classes, ban/kick management, and utilities.
-- `SetWeather`, `GetWeather`, `SetWorldTime`, `GetWorldTime`, `SetGravity`, `GetGravity`, `GetTickCount`, `GetServerTickCount`, `GetServerTickRate`, `GetMaxPlayers`, `GetPlayerPoolSize`, `GetVehiclePoolSize`, `GetActorPoolSize`, `SetGameModeText`, `AddPlayerClass`, `AddPlayerClassEx`, `ShowNameTags`, `ShowPlayerMarkers`, `AllowInteriorWeapons`, `AllowAdminTeleport`, `EnableZoneNames`, `EnableTirePopping`, `UsePlayerPedAnims`, `DisableInteriorEnterExits`, `DisableVehicleMarkers`, `DisableNameTagLOS`, `SetNameTagDrawDistance`, `LimitGlobalChatRadius`, `LimitPlayerMarkerRadius`, `SetDeathDropAmount`, `GameModeExit`, `SetMaxRconLoginAttempt`, `GetWeaponName`, `FindWeaponId`, `GetVehicleName`, `FindVehicleModel`, `CreateExplosion`, `CreateExplosionForPlayer`, `SetDisabledWeapons`, `EnableStuntBonusForAll`, `EnableStuntBonusForPlayer`, `GetServerVarAsString`, `GetServerVarAsInt`, `GetServerVarAsBool`, `Kick`, `Ban`, `BanEx`, `RemoveBan`, `IsBanned`, `BlockIpAddress`, `UnblockIpAddress`.
+### 12. `WorldAPI` (`api->world`)
 
-### 15. `TimersAPI` (`api->timers`)
-High-resolution server timers.
-- `SetTimer`, `KillTimer`.
+- SetWeather, GetWeather, SetWorldTime, GetWorldTime, SetGravity, GetGravity, GetTickCount, GetServerTickCount, GetServerTickRate, SetGameModeText, ShowNameTags, ShowPlayerMarkers, EnableZoneNames, EnableTirePopping, UsePlayerPedAnims, DisableInteriorEnterExits, DisableVehicleMarkers, DisableNameTagLOS, SetNameTagDrawDistance, LimitGlobalChatRadius, LimitPlayerMarkerRadius, SetDeathDropAmount, GameModeExit, GetWeaponName, FindWeaponId, GetVehicleName, FindVehicleModel, CreateExplosion, CreateExplosionForPlayer, SetDisabledWeapons, EnableStuntBonusForAll, EnableStuntBonusForPlayer, Kick, Ban, BanEx, RemoveBan, IsBanned, BlockIpAddress, UnblockIpAddress.
+
+### 13. `TimersAPI` (`api->timers`)
+
+- SetTimer, KillTimer.

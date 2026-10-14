@@ -29,8 +29,8 @@ In `src/Main.cpp`, keep the standard exported entry points:
 
 ## 2. Calling Direct Server Subsystem APIs
 
-Legacy Server exposes 15 direct subsystem tables on `AddonAPI`:
-`actor`, `player`, `vehicle`, `object`, `pickup`, `gangzone`, `label`, `menu`, `messaging`, `netstats`, `textdraw`, `filesystem`, `variables`, `world`, `timers`.
+Legacy Server exposes 13 direct subsystem tables on `AddonAPI` v5:
+`actor`, `player`, `vehicle`, `object`, `pickup`, `gangzone`, `label`, `menu`, `messaging`, `netstats`, `filesystem`, `world`, and `timers`.
 
 These are direct function pointers into the server core, offering maximum performance without scripting overhead.
 
