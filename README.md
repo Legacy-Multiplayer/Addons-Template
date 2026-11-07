@@ -1,203 +1,55 @@
-# Server Native Addon Template
+# Legacy native addon template
 
-A complete, standalone development template for creating native C/C++ addons for **Legacy Server**.
+Build native server plugins with C++17. Derive from `CAddon`, register typed functions and events in `OnLoad()`, then write `LEGACY_ADDON(YourClass)`. The framework owns registrations and cleanup.
 
-Native addons are dynamically loaded shared libraries (`.dll` on Windows, `.so` on Linux) that extend the server through a versioned, ABI-stable C API (`AddonAPI`). Addons can call direct server subsystems (players, vehicles, objects, messaging, world, etc.), expose native routines to Lua, listen to server events, dispatch custom events, and invoke dynamic Lua functions.
+```cpp
+#include "CAddon.h"
 
----
+class CExampleAddon final : public CAddon
+{
+    bool OnLoad() override
+    {
+        Function("doubleNumber", [](int number)
+        {
+            return number * 2;
+        });
+        Event("onPlayerConnect", [this](int playerId)
+        {
+            Log.Info("Player {} connected", playerId);
+        });
+        return true;
+    }
+};
 
-## 1. Project Structure
-
-```
-Legacy-Server-Addon-Template/
-├── CMakeLists.txt              # Standalone CMake build configuration
-├── README.md                   # Project documentation & quickstart
-├── LICENSE                     # MIT license
-│
-├── include/
-│   └── Addon.h                 # Public Addon SDK & C ABI specification (13 subsystems)
-│
-├── src/
-│   └── Main.cpp                # Addon entry points & example implementation
-│
-├── examples/
-│   └── example.lua             # Example Lua script demonstrating addon interop
-│
-└── docs/
-    ├── API.md                  # Comprehensive Addon SDK API reference
-    ├── BUILDING.md             # Detailed build & deployment instructions
-    └── DEVELOPMENT.md          # Step-by-step developer guide for new addons
+LEGACY_ADDON(CExampleAddon)
 ```
 
----
+Lua can call `doubleNumber(21)` and receive `42`. Wrong types and out-of-range integers produce a Lua error naming the function.
 
-## 2. Requirements
+## Build
 
-- **CMake**: Version 3.15 or higher
-- **C++ Compiler**: C++17 compatible
-  - **Windows**: Microsoft Visual C++ (MSVC 2019 / 2022 via Visual Studio or Build Tools)
-  - **Linux**: GCC 9+ or Clang 10+
-- **Legacy Server**: Addon loader enabled (`addons/` directory)
+Requirements: CMake 3.17+, C++17, a 32-bit toolchain matching Legacy Server.
 
----
+Windows:
 
-## 3. Quickstart: Building & Installation
-
-### Windows (PowerShell / Command Prompt - 32-bit x86):
-```powershell
-cmake -S . -B build -A Win32 -DCMAKE_BUILD_TYPE=Release
+```sh
+cmake -S . -B build -A Win32
 cmake --build build --config Release --parallel
 ```
-Output: `build/Release/ExampleAddon.dll`
 
-### Linux (Terminal):
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j$(nproc)
-```
-Output: `build/ExampleAddon.so`
+Linux with multilib installed:
 
-### Deployment:
-Copy the compiled binary (`ExampleAddon.dll` or `ExampleAddon.so`) into your Legacy Server's `addons/` directory:
-```
-Legacy-Server/
-├── server.exe
-├── setup.json
-└── addons/
-    └── ExampleAddon.dll
-```
-Upon server startup, the addon loader will automatically discover and initialize the addon.
-
----
-
-## 4. Architecture & Lifecycle
-
-### Addon Entry Points
-Every addon exports two standard functions:
-
-1. **`AddonMain`**:
-   ```c
-   ADDON_EXPORT bool AddonMain(const AddonAPI* api, void* addon);
-   ```
-   Invoked immediately after the dynamic library is loaded. Receives the `AddonAPI` function table and an opaque `addon` instance handle. Returning `true` keeps the addon loaded; returning `false` cleanly unloads the library without crashing the server.
-
-2. **`AddonUnload`**:
-   ```c
-   ADDON_EXPORT void AddonUnload(void);
-   ```
-   Invoked during server shutdown before the library is unloaded from memory. Used to unregister functions, event handlers, and free resources.
-
----
-
-## 5. Main Features Demonstrated
-
-### 1. Direct Server Subsystem APIs (13 Subsystems)
-Addons have direct access to the 13 subsystem tables in `AddonAPI` v5:
-`actor`, `player`, `vehicle`, `object`, `pickup`, `gangzone`, `label`, `menu`, `messaging`, `netstats`, `filesystem`, `world`, and `timers`.
-
-```cpp
-if (api->player && api->player->IsConnected(playerId))
-{
-    const char* name = api->player->GetName(playerId);
-    api->messaging->SendClientMessage(playerId, 0x00FF00FF, "Welcome!");
-}
+```sh
+CXXFLAGS=-m32 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
 ```
 
----
+Place the resulting `ExampleAddon.dll` or `ExampleAddon.so` in the server's `addons/` directory. Rename the target once in `CMakeLists.txt`; `legacy_addon(Name src/Main.cpp)` supplies shared-library settings, SDK includes, and exports.
 
-### 2. Exposing Native Functions to Lua
-Addons register native functions using `api->RegisterFunction`:
+## SDK layout
 
-```cpp
-static int HelloFunction(const Value* arguments, size_t argumentCount, Value* results, size_t maxResults, void* userData)
-{
-    const char* name = (argumentCount > 0 && arguments[0].type == ADDON_VALUE_STRING)
-        ? arguments[0].stringValue
-        : "World";
+The addon API version remains **1**. This update intentionally changes its binary layout. Rebuild every addon with the current headers; previous addon binaries are unsupported. The host checks `GetAddonSDKSignature` before initialization and rejects stale DLLs. `LEGACY_ADDON` generates that export and the standard lifecycle exports automatically. Do not change or copy a signature to bypass the check.
 
-    char greeting[256];
-    snprintf(greeting, sizeof(greeting), "Hello, %s!", name);
+The four SDK headers must come from the same server revision: `Addon.h`, `CAddon.h`, `CAddonValues.h`, and `CAddonResources.h`. No server internals, Lua headers, platform injection code, or external C++ libraries are required.
 
-    if (results && maxResults > 0)
-    {
-        results[0] = ValueString(greeting);
-        return 1; // 1 return value
-    }
-    return 0;
-}
-
-// In AddonMain:
-api->RegisterFunction(addon, "hello", HelloFunction, nullptr);
-```
-
-In Lua:
-```lua
-local msg = hello("Developer")
-print(msg) -- "Hello, Developer!"
-```
-
----
-
-### 3. Setting Global Lua Constants & Variables
-Addons can export typed globals into Lua during initialization:
-
-```cpp
-api->SetGlobalString(addon, "EXAMPLE_ADDON_VERSION", "1.0.0");
-api->SetGlobalInteger(addon, "EXAMPLE_ADDON_LOADED", 1);
-```
-
----
-
-### 4. Dynamic Function Invocation (`CallContext`)
-For functions defined dynamically in Lua scripts:
-
-```cpp
-CallContext* call = api->BeginCall(addon, "onCustomLuaEvent");
-if (call)
-{
-    api->PushInteger(call, 42);
-    api->ExecuteCall(call);
-    api->EndCall(call);
-}
-```
-
----
-
-### 5. Subscribing to Server & Custom Events
-Addons can subscribe to server lifecycle and gameplay events (e.g. `onPlayerConnect`):
-
-```cpp
-static void OnPlayerConnectHandler(const char* eventName, const Value* arguments, size_t argumentCount, void* userData)
-{
-    if (argumentCount > 0)
-    {
-        int playerId = (int)arguments[0].integerValue;
-        // Handle player connection...
-    }
-}
-
-// In AddonMain:
-api->RegisterEvent(addon, "onPlayerConnect", OnPlayerConnectHandler, nullptr);
-```
-
----
-
-## 6. ABI & Safety Guarantees
-
-- **No C++ Standard Library in ABI**: The public API uses C-compatible structs (`Value`, `Vector3`, `AddonAPI`) and opaque pointers (`CallContext`).
-- **No Sol2 / Lua Direct Linking**: Addons do not link against Lua or Sol2. The server handles all runtime interactions internally.
-- **Protected Execution**: Lua errors during dynamic function execution are captured and returned via `api->GetError(call)` rather than crashing the server.
-
----
-
-## 7. Documentation Index
-
-- [**API Reference**](docs/API.md): Full technical specification of all 13 subsystems, types, functions, and callbacks.
-- [**Building Guide**](docs/BUILDING.md): Detailed compilation instructions for Windows and Linux.
-- [**Development Guide**](docs/DEVELOPMENT.md): Guide for creating and customizing new native addons.
-
----
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+See [API](docs/API.md) for the helpers and [development](docs/DEVELOPMENT.md) for lifetime and threading rules. The essential addons use this same framework.

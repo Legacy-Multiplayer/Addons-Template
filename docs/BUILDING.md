@@ -7,18 +7,18 @@ This guide explains how to compile native addons from source on Windows and Linu
 ## 1. Prerequisites
 
 ### Windows:
-- **CMake**: Version 3.15 or higher ([cmake.org](https://cmake.org/download/))
+- **CMake**: Version 3.17 or higher ([cmake.org](https://cmake.org/download/))
 - **Visual Studio**: 2019 or 2022 with the **Desktop development with C++** workload (MSVC v142/v143 toolset)
 
 ### Linux:
-- **CMake**: Version 3.15 or higher (`sudo apt install cmake` or equivalent)
-- **Compiler**: GCC 9+ or Clang 10+ (`sudo apt install build-essential`)
+- **CMake**: Version 3.17 or higher (`sudo apt install cmake` or equivalent)
+- **Compiler**: GCC 9+ or Clang 10+ (`sudo apt install build-essential g++-multilib`)
 
 ---
 
 ## 2. Building on Windows (x86 32-bit)
 
-Native addons must be built as **32-bit (x86)** to match Legacy Server and the SA-MP client.
+Native addons must be built as **32-bit (x86)** to match Legacy Server.
 
 Open **Developer PowerShell for VS 2022** (or Command Prompt) and run:
 
@@ -45,7 +45,7 @@ Open a terminal in the project root and run:
 
 ```bash
 # 1. Configure the CMake build system
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+CFLAGS=-m32 CXXFLAGS=-m32 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
 # 2. Compile the shared library
 cmake --build build -j$(nproc)

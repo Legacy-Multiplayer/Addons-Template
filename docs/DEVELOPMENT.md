@@ -1,222 +1,33 @@
-# Addon Developer Guide
+# Developing an addon
 
-This guide walks through creating custom native addons using this template.
+1. Rename `ExampleAddon` in `CMakeLists.txt`.
+2. Derive a class from `CAddon` in `src/Main.cpp`.
+3. Implement `OnLoad()` and register typed functions/events there.
+4. Add `LEGACY_ADDON(YourClass)` once.
+5. Build for the server's 32-bit architecture and install the binary in `addons/`.
 
----
+The starter has a Lua `hello(name)` function, a connection event, and a once-only script-ready event. Additional source files can contain ordinary helper classes; list them as further arguments to `legacy_addon`.
 
-## 1. Setting Up Your Own Addon
+## Ownership
 
-### Step 1: Copy and Rename the Project
-1. Copy `Legacy-Server-Addon-Template` to a new folder (e.g., `MyCustomAddon`).
-2. Open `CMakeLists.txt` and update the project name:
-   ```cmake
-   project(MyCustomAddon VERSION 1.0.0 LANGUAGES CXX)
-   ```
-   and the target output name:
-   ```cmake
-   set_target_properties(${PROJECT_NAME} PROPERTIES
-       PREFIX ""
-       OUTPUT_NAME "MyCustomAddon"
-   )
-   ```
+Return false or throw from OnLoad to reject initialization. Registration failures automatically throw; a half-registered addon will not remain active. OnUnload must tolerate partial initialization. Use OnCleanup for external connections and resources you create. Cleanup runs once per load in reverse registration order, even if a prior cleanup callback throws.
 
-### Step 2: Configure Addon Entry Points
-In `src/Main.cpp`, keep the standard exported entry points:
-- `ADDON_EXPORT bool AddonMain(const AddonAPI* api, void* addon)`
-- `ADDON_EXPORT void AddonUnload(void)`
+Functions, events, timers, and background completions cannot remain callable after unload. Saved Lua closures report an unloaded-function error. The host cancels and joins asynchronous work before freeing its DLL. No worker may run Lua or mutate world state.
 
----
+Native function results support up to the host's 16-value result limit. Typed tuple strings have independent storage. RawFunction callbacks must keep returned strings valid until the host converts them immediately after return; never return a pointer into a temporary local string.
 
-## 2. Calling Direct Server Subsystem APIs
+## Entity lifetimes
 
-Legacy Server exposes 13 direct subsystem tables on `AddonAPI` v5:
-`actor`, `player`, `vehicle`, `object`, `pickup`, `gangzone`, `label`, `menu`, `messaging`, `netstats`, `filesystem`, `world`, and `timers`.
+Do not retain raw server pointers. Keep a checked `CAddonEntity`, then call IsValid before applying a change. This checks a lifetime generation, not just whether the numeric slot is occupied. Use Players for humans, NPCs for server-controlled players, and Actors for actors.
 
-These are direct function pointers into the server core, offering maximum performance without scripting overhead.
+OnLoad runs before server world initialization. Register features there; defer entity work to onMainScriptInit or later callbacks. Server shutdown calls script-exit handlers while addon bindings and pools still exist, then unloads addons, then destroys pools and Lua.
 
-### Example: Player and Messaging Subsystems
-```cpp
-void HealAndNotifyPlayer(int playerId)
-{
-    if (g_API && g_API->player && g_API->messaging)
-    {
-        if (g_API->player->IsConnected(playerId))
-        {
-            // Set player health to 100
-            g_API->player->SetHealth(playerId, 100.0f);
+## Updating the SDK
 
-            // Send green client message
-            g_API->messaging->SendClientMessage(playerId, 0x00FF00FF, "You have been healed!");
-        }
-    }
-}
-```
+Replace all four SDK headers together and rebuild. Version remains 1, but this update is deliberately not binary compatible with previous addon builds. The layout fingerprint prevents accidental calls through mismatched tables. Do not use an old signature or add compatibility forwarding.
 
----
+The template and essential addons share identical SDK headers and the same CMake helper. For complex existing Lua functions with table/callback values, use the existing host closure through Builtin; do not create a lossy scalar forwarding bridge.
 
-## 3. Exposing Native Functions to Lua
+## Validation
 
-Addons can expose high-performance native C/C++ routines directly to server Lua scripts.
-
-### 1. Implement Callback
-```cpp
-static int MyMathFunction(
-    const Value* arguments,
-    size_t argumentCount,
-    Value* results,
-    size_t maxResults,
-    void* userData
-) {
-    if (argumentCount < 2)
-    {
-        return 0; // Return 0 values to Lua (evaluates to nil in script)
-    }
-
-    // Convert input arguments
-    double a = (arguments[0].type == ADDON_VALUE_INTEGER) ? (double)arguments[0].integerValue : arguments[0].numberValue;
-    double b = (arguments[1].type == ADDON_VALUE_INTEGER) ? (double)arguments[1].integerValue : arguments[1].numberValue;
-
-    // Write return values into results buffer
-    if (results && maxResults > 0)
-    {
-        results[0] = ValueNumber(a * b);
-        return 1; // 1 return value
-    }
-
-    return 0;
-}
-```
-
-### 2. Register in `AddonMain`
-```cpp
-static uint64_t g_MathFuncHandle = 0;
-
-ADDON_EXPORT bool AddonMain(const AddonAPI* api, void* addon)
-{
-    g_MathFuncHandle = api->RegisterFunction(addon, "myMultiply", MyMathFunction, nullptr);
-    return true;
-}
-```
-
-### 3. Call from Lua Script
-```lua
-local product = myMultiply(6, 7)
-print("Product: " .. product) -- 42
-```
-
----
-
-## 4. Subscribing to Server & Custom Events
-
-Addons can listen to events dispatched by the server or by Lua scripts.
-
-### 1. Implement Event Callback
-```cpp
-static void OnPlayerDisconnectHandler(
-    const char* eventName,
-    const Value* arguments,
-    size_t argumentCount,
-    void* userData
-) {
-    if (argumentCount > 1)
-    {
-        int64_t playerId = arguments[0].integerValue;
-        int64_t reason = arguments[1].integerValue;
-        // Handle disconnection...
-    }
-}
-```
-
-### 2. Register in `AddonMain`
-```cpp
-static uint64_t g_DisconnectEventHandle = 0;
-
-ADDON_EXPORT bool AddonMain(const AddonAPI* api, void* addon)
-{
-    g_DisconnectEventHandle = api->RegisterEvent(addon, "onPlayerDisconnect", OnPlayerDisconnectHandler, nullptr);
-    return true;
-}
-```
-
----
-
-## 5. Exporting Global Variables & Constants to Lua
-
-Addons can export global variables into the server's Lua runtime during `AddonMain`:
-
-```cpp
-api->SetGlobalString(addon, "MY_ADDON_VERSION", "2.0.0");
-api->SetGlobalInteger(addon, "MY_ADDON_MAX_SLOTS", 64);
-api->SetGlobalBoolean(addon, "MY_ADDON_ENABLED", true);
-```
-
-In Lua:
-```lua
-print(MY_ADDON_VERSION)   -- "2.0.0"
-print(MY_ADDON_MAX_SLOTS) -- 64
-```
-
----
-
-## 6. Invoking Dynamic Lua Functions (`CallContext`)
-
-For functions defined dynamically in Lua scripts or third-party gamemodes:
-
-```cpp
-CallContext* call = api->BeginCall(addon, "customGamemodeFunction");
-if (call)
-{
-    api->PushInteger(call, playerId);
-    api->PushString(call, "bonus_code");
-
-    if (api->ExecuteCall(call))
-    {
-        if (api->GetResultCount(call) > 0)
-        {
-            bool granted = api->GetResultBoolean(call, 0);
-        }
-    }
-    else if (api->HasError(call))
-    {
-        api->Log(addon, ADDON_LOG_WARN, api->GetError(call));
-    }
-
-    // Always release CallContext
-    api->EndCall(call);
-}
-```
-
----
-
-## 7. Resource Management & Clean Unload
-
-Addons must clean up registered handles and heap allocations inside `AddonUnload`:
-
-```cpp
-ADDON_EXPORT void AddonUnload(void)
-{
-    if (g_API && g_Addon)
-    {
-        if (g_MathFuncHandle)
-        {
-            g_API->UnregisterFunction(g_Addon, g_MathFuncHandle);
-            g_MathFuncHandle = 0;
-        }
-
-        if (g_DisconnectEventHandle)
-        {
-            g_API->UnregisterEvent(g_Addon, g_DisconnectEventHandle);
-            g_DisconnectEventHandle = 0;
-        }
-    }
-}
-```
-
----
-
-## 8. Architecture & ABI Guidelines
-
-1. **Self-Contained ABI**: Do not link your addon directly against `server.exe` or private server static libraries. The server exposes everything through `Addon.h`.
-2. **No STL in ABI**: Use primitive C types, `Value`, and `Vector3`/`Vector4` structures across the boundary.
-3. **Thread Affinity**: All callbacks and function invocations run synchronously on the server's main thread.
-4. **Error Resilience**: `CallContext` and `FunctionCallback` executions are protected — runtime errors are reported through `api->GetError(call)` rather than crashing the server.
+Build your DLL, test successful and failed initialization, unload/reload, missing/wrong Lua arguments, timers cancelling themselves, entity ID reuse, and background work during shutdown. A build does not establish in-game behavior. Validate Windows and Linux with their native toolchains before publishing binaries for both platforms.

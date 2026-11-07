@@ -11,6 +11,7 @@ Makefile
 CMakeScripts/
 *.cmake
 !CMakeLists.txt
+!cmake/*.cmake
 
 # Visual Studio / MSBuild
 .vs/

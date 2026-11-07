@@ -1,272 +1,108 @@
-# Legacy Server Addon SDK — API Reference
+# C++ addon API
 
-This document provides the complete technical specification for the Legacy Server Native Addon SDK (`include/Addon.h`).
+The public C++ entry point is `#include "CAddon.h"`. The underlying C tables remain in `Addon.h` for low-level integrations.
 
----
+## Lifecycle and registration
 
-## 1. Overview & Architecture
+| Member | Behavior |
+| --- | --- |
+| `bool OnLoad()` | Override to register features. Return true on success. False or an exception rolls back owned resources. |
+| `void OnUnload()` | Optional override; called before the framework releases bindings. Also called after partial initialization. |
+| `LEGACY_ADDON(ClassName)` | Generate the instance, version/layout exports, and load/unload exports. Use once per DLL. |
+| `Function(name, callable)` | Expose a typed function to Lua. |
+| `Event(name, callable)` | Subscribe to an event using a typed prefix of its arguments; returns an event handle. |
+| `Once(name, callable)` | Subscribe once, including protection against recursive delivery. |
+| `Off(handle)` | Remove one of this addon's event subscriptions; returns success. |
+| `Builtin(name)` | Essential-addon facility exposing an existing host `__core_` closure directly, preserving Lua tables and callbacks. Missing host functions fail initialization. |
+| `RawFunction(name, callback, userData)` | Low-level `Value` callback for special result shapes. The framework owns registration, not external userData. |
+| `OnCleanup(callback)` | Register a main-thread cleanup callback; callbacks run in reverse order. |
+| `API()` / `Handle()` | Access the native host table / opaque owner for advanced operations. |
 
-Legacy Server native addons are dynamic shared libraries (`.dll` on Windows, `.so` on Linux) loaded directly into the server process. Addons interact with the server through a versioned (current ABI v5), C-compatible function table (`AddonAPI`) and lightweight, ABI-safe data structures (`Value`, `CallContext`, `Vector3`, `Vector4`).
+`Function` accepts named functions and ordinary typed lambdas. Supported values: bool, signed/unsigned integers within Lua's int64 range, float/double, string, and optional values. Missing/nil optional arguments become `std::nullopt`. Extra function arguments, fractional IDs, non-finite numbers, and overflow are errors. Void returns no Lua values; `std::tuple` returns multiple values. Strings returned by typed functions are copied into binding-owned storage until the host converts them.
 
-### Key Principles:
-- **Direct Subsystem Performance**: 13 direct server subsystem API tables provide native access to the server core (Players, Vehicles, Objects, Messaging, World, etc.).
-- **Dynamic Invocations**: The addon can call any Lua script function dynamically using the `CallContext` builder pattern.
-- **Global Lua Exports**: Addons can export typed global constants (`SetGlobalInteger`, `SetGlobalString`, etc.) directly into the Lua state.
-- **ABI Stability**: No C++ standard library structures (`std::string`, `std::vector`) cross the ABI boundary.
-- **Server Owns Runtime**: The server manages Lua state and lifecycle.
-
----
-
-## 2. Types & Data Structures
-
-### `LogLevel`
-Severity levels for addon log messages sent through `api->Log`.
-
-| Identifier | Value | Description |
-| :--- | :--- | :--- |
-| `ADDON_LOG_INFO` | `0` | Informational messages. |
-| `ADDON_LOG_WARN` | `1` | Non-fatal warnings. |
-| `ADDON_LOG_ERROR` | `2` | Error conditions. |
-| `ADDON_LOG_DEBUG` | `3` | Verbose diagnostic messages. |
-
----
-
-### `ValueType`
-Enumerates the runtime types represented by a `Value` struct or returned by `CallContext`.
-
-| Identifier | Value | Lua Equivalent | Notes |
-| :--- | :--- | :--- | :--- |
-| `ADDON_VALUE_NIL` | `0` | `nil` | Represents absence of a value. |
-| `ADDON_VALUE_BOOLEAN` | `1` | `boolean` | `true` or `false`. |
-| `ADDON_VALUE_INTEGER` | `2` | `integer` | 64-bit signed integer (`int64_t`). |
-| `ADDON_VALUE_NUMBER` | `3` | `number` | 64-bit IEEE 754 floating-point (`double`). |
-| `ADDON_VALUE_STRING` | `4` | `string` | Null-terminated UTF-8 string pointer (`const char*`). |
-| `ADDON_VALUE_USERDATA` | `5` | `userdata` | Opaque memory/handle pointer (`void*`). |
-| `ADDON_VALUE_TABLE` | `6` | `table` | Reserved for nested table representations. |
-| `ADDON_VALUE_FUNCTION` | `7` | `function` | Reserved for first-class function references. |
-
----
-
-### `Value`
-An ABI-safe tagged union holding primitive data types passed to or from Lua.
-
-```c
-typedef struct Value {
-    ValueType type;
-    union {
-        bool booleanValue;
-        int64_t integerValue;
-        double numberValue;
-        const char* stringValue;
-        void* pointerValue;
-    };
-} Value;
+```cpp
+Function("describe", [](int id, std::optional<std::string> prefix)
+{
+    return std::make_tuple(id, prefix.value_or("Entity"));
+});
 ```
 
-#### Helper Constructors:
-- `Value ValueNil(void)`: Constructs a nil Value.
-- `Value ValueBoolean(bool booleanValue)`: Constructs a boolean Value.
-- `Value ValueInteger(int64_t integerValue)`: Constructs a 64-bit integer Value.
-- `Value ValueNumber(double numberValue)`: Constructs a double-precision float Value.
-- `Value ValueString(const char* stringValue)`: Constructs a string Value.
-- `Value ValuePointer(void* pointerValue)`: Constructs a userdata pointer Value.
+Use `std::string` for retained text. Low-level `const char*` argument views are valid only during the call.
 
----
+## Calls, logging, files and configuration
 
-### POD Vectors
+| Member | Behavior |
+| --- | --- |
+| `Call(name, args...)` | Invoke a Lua/host function; throw on failure; discard results. |
+| `CallResult<T>(name, args...)` | Invoke and return its first result using checked conversion. Use owned types, especially `std::string`. |
+| `Log.Info(format, args...)` | Log at info level with the addon's name supplied by the host. |
+| `Log.Warning(format, args...)` / `Log.Error(...)` | Warning/error variants. Replace each `{}` with the next argument. |
+| `Files.Exists(path)` | Check a resource-relative file path. |
+| `Files.ReadText(path)` | Read UTF-8 text, up to 4 MiB; throw on failure. |
+| `Files.WriteText(path, text)` | Write and flush text, up to 4 MiB; throw on failure. Not an atomic transaction. |
+| `Config.Load(path)` | Load an INI-style key/value file transactionally. False if absent; malformed data throws. |
+| `Config.Get<T>(key, fallback)` | Read a typed value; absent uses fallback, invalid stored data throws. |
+| `Config.Set(key, value)` | Set one value in memory. Keys allow letters, numbers, dot, underscore and hyphen. |
+| `Config.Save(path)` | Write the current configuration using the resource file API. |
 
-```c
-typedef struct Vector3 {
-    float x;
-    float y;
-    float z;
-} Vector3;
+Paths resolve within server resources, with the host's existing path restrictions. They are not relative to a developer's computer. Text functions reject embedded NUL data; binary files belong to the native filesystem/asset APIs. Configuration uses `key = "value"`, one entry per line, with `#` or `;` comments on separate lines. Bool values are `true`/`false`.
 
-typedef struct Vector4 {
-    float x;
-    float y;
-    float z;
-    float w;
-} Vector4;
+```cpp
+Config.Load("example.ini");
+const int limit = Config.Get<int>("limit", 10);
+Config.Set("limit", limit);
+Config.Save("example.ini");
 ```
 
----
+## Timers and background work
 
-### `CallContext`
-An opaque struct representing an active dynamic function call context.
+| Member | Behavior |
+| --- | --- |
+| `Every(intervalMs, callback)` | Repeating main-thread timer; returns a handle. |
+| `After(delayMs, callback)` | One-shot main-thread timer; returns a handle. |
+| `CancelTimer(handle)` | Cancel this addon's timer; returns success. |
+| `Async(worker, completion)` | Queue bounded worker work and return a handle; completion runs on the main thread. |
+| `CAddonCancellation::IsCancelled()` | Worker checks whether its owner is shutting down. |
 
-```c
-typedef struct CallContext CallContext;
+Intervals must be positive. Timer callbacks never overlap. Missed intervals are coalesced instead of firing a burst. Native addon timers are processed by the host loop, including while gameplay is paused. A throwing timer is cancelled and logged.
+
+```cpp
+After(1000, [this]()
+{
+    Log.Info("One second passed");
+});
+Async([](CAddonCancellation cancellation)
+{
+    // Pure bounded computation or independently owned I/O only.
+    return cancellation.IsCancelled() ? std::string() : std::string("ready");
+}, [this](std::string result)
+{
+    Log.Info("Worker result: {}", result);
+});
 ```
 
-- **Lifetime**: Allocated by `api->BeginCall(...)` and must be released via `api->EndCall(...)`.
-- **Reentrancy**: Each `CallContext` instance is completely isolated.
-- **Memory Safety**: String pointers returned from `GetResultString` remain valid throughout the lifetime of the `CallContext`.
+Do not access Lua, `API()`, entity collections, `Files`, `Config`, or `Log` from the worker. Copy inputs before scheduling; revalidate entities in completion. Workers must finish or cooperate with cancellation: unloading waits for them before freeing the DLL. A worker exception logs an error and skips completion. Unload cancels timers and pending completions, waits for in-flight work, then disposes captured objects on the main thread. The host caps pending native jobs at 32, uses two worker threads, and caps native timers at 4096. Rejection throws from the C++ helper. There is no per-job force termination.
 
----
+## Checked entity access
 
-## 3. Callback Signatures
+`Players`, `NPCs`, `Actors`, `Vehicles`, and `Objects` provide:
 
-### `FunctionCallback`
-Signature for native C functions callable directly from Lua scripts.
+- `Find(id)` returns a checked entity reference.
+- `reference.IsValid()` checks existence and its generation.
+- `reference.Id()` returns the ID or throws if the reference is stale.
+- `ForEach(callback)` snapshots references, then skips those deleted or replaced during iteration.
 
-```c
-typedef int (*FunctionCallback)(
-    const Value* arguments,
-    size_t argumentCount,
-    Value* results,
-    size_t maxResults,
-    void* userData
-);
+`Players` contains humans only; NPCs and actors have separate collections. `Objects` enumerates global objects; player-private objects still use their explicit native APIs. Entity helpers are main-thread only. An ID reused after disconnect or deletion does not validate an earlier reference. OnLoad runs before world pools exist, so create/query entities from `onMainScriptInit` or later events.
+
+```cpp
+Players.ForEach([this](const CAddonEntity& player)
+{
+    API()->player->SetMoney(player.Id(), 1000);
+});
 ```
 
-- **`arguments`**: Array of input arguments passed from the Lua caller.
-- **`argumentCount`**: Number of elements in `arguments`.
-- **`results`**: Buffer where the callback writes its return values.
-- **`maxResults`**: Capacity of the `results` buffer (typically 16).
-- **`userData`**: Context pointer passed during `RegisterFunction`.
-- **Returns**: Number of return values written to `results` ($0..\text{maxResults}$).
+## Native C interface
 
----
+Subsystem tables: actor, player, vehicle, object, pickup, gangzone, label, menu, messaging, netstats, filesystem, world, timers, and audio. `audio->Play` / `audio->Stop` use registered audio assets, not URLs. `player->IsNPC` is available when using a shared player ID explicitly. Lua uses `getPlayerIPAddress` and `isPlayerAFK`; removed aliases and URL audio functions are not restored.
 
-### `EventCallback`
-Signature for event handler functions listening to server or custom events.
-
-```c
-typedef void (*EventCallback)(
-    const char* eventName,
-    const Value* arguments,
-    size_t argumentCount,
-    void* userData
-);
-```
-
-- **`eventName`**: Name of the event being dispatched (e.g., `"onPlayerConnect"`).
-- **`arguments`**: Array of event parameters.
-- **`argumentCount`**: Number of event parameters.
-- **`userData`**: Context pointer passed during `RegisterEvent`.
-
----
-
-## 4. Addon Entry Points
-
-Every native addon must export `AddonMain`. `AddonUnload` is optional but strongly recommended.
-
-### `AddonMain`
-```c
-ADDON_EXPORT bool AddonMain(const AddonAPI* api, void* addon);
-```
-- **Invoked**: Immediately upon loading the `.dll` or `.so`.
-- **Parameters**:
-  - `api`: Pointer to the server's function table.
-  - `addon`: Opaque handle representing this addon instance.
-- **Returns**: `true` to keep the addon loaded; `false` to cleanly unload without crashing.
-
-### `AddonUnload`
-```c
-ADDON_EXPORT void AddonUnload(void);
-```
-- **Invoked**: During server shutdown or manual addon unloading before the shared library handle is freed.
-- **Responsibilities**: Unregister active function/event handles and free addon-owned heap resources.
-
----
-
-## 5. AddonAPI Core Methods
-
-### Addon Metadata & Logging
-- `const char* (*GetName)(void* addon);` — Returns the addon's name.
-- `const char* (*GetPath)(void* addon);` — Returns the absolute path of the loaded addon library.
-- `void (*Log)(void* addon, LogLevel level, const char* message);` — Logs a message to the server console and log file.
-
-### Function Registration
-- `uint64_t (*RegisterFunction)(void* addon, const char* functionName, FunctionCallback callback, void* userData);` — Registers a native function into Lua.
-- `bool (*UnregisterFunction)(void* addon, uint64_t handle);` — Unregisters a native function.
-
-### Event System
-- `uint64_t (*RegisterEvent)(void* addon, const char* eventName, EventCallback callback, void* userData);` — Subscribes to server/custom events.
-- `bool (*UnregisterEvent)(void* addon, uint64_t handle);` — Unsubscribes from an event.
-- `bool (*TriggerEvent)(void* addon, const char* eventName, const Value* arguments, size_t argumentCount);` — Dispatches an event to the Lua event bus.
-
-### Global Lua Constants
-- `bool (*SetGlobalInteger)(void* addon, const char* name, int64_t value);`
-- `bool (*SetGlobalNumber)(void* addon, const char* name, double value);`
-- `bool (*SetGlobalString)(void* addon, const char* name, const char* value);`
-- `bool (*SetGlobalBoolean)(void* addon, const char* name, bool value);`
-
-### Dynamic Function Calling (`CallContext`)
-- `CallContext* (*BeginCall)(void* addon, const char* functionName);`
-- `void (*EndCall)(CallContext* context);`
-- `bool (*PushNil)(CallContext* context);`
-- `bool (*PushBoolean)(CallContext* context, bool value);`
-- `bool (*PushInteger)(CallContext* context, int64_t value);`
-- `bool (*PushNumber)(CallContext* context, double value);`
-- `bool (*PushString)(CallContext* context, const char* value);`
-- `bool (*PushValue)(CallContext* context, const Value* value);`
-- `bool (*ExecuteCall)(CallContext* context);`
-- `size_t (*GetResultCount)(const CallContext* context);`
-- `ValueType (*GetResultType)(const CallContext* context, size_t index);`
-- `bool (*GetResultBoolean)(const CallContext* context, size_t index);`
-- `int64_t (*GetResultInteger)(const CallContext* context, size_t index);`
-- `double (*GetResultNumber)(const CallContext* context, size_t index);`
-- `const char* (*GetResultString)(const CallContext* context, size_t index);`
-- `bool (*GetResultValue)(const CallContext* context, size_t index, Value* outValue);`
-- `bool (*HasError)(const CallContext* context);`
-- `const char* (*GetError)(const CallContext* context);`
-
----
-
-## 6. Server Subsystem APIs (13 Subsystems)
-
-These tables match the current `include/Addon.h` ABI. The function names below are the members exposed by each table.
-
-### 1. `ActorAPI` (`api->actor`)
-
-- Create, Destroy, IsValid, SetPosition, GetPosition, SetFacingAngle, GetFacingAngle, SetHealth, GetHealth, SetInvulnerable, IsInvulnerable, SetVirtualWorld, GetVirtualWorld, ApplyAnimation, ClearAnimations.
-
-### 2. `PlayerAPI` (`api->player`)
-
-- IsConnected, GetName, GetIp, GetPosition, GetVelocity, GetCameraPosition, GetCameraFrontVector, GetWorldBounds, GetKeys, GetTime, GetWeaponData, GetHealth, GetArmour, GetFacingAngle, GetPing, GetCameraZoom, GetCameraAspectRatio, GetTeam, GetSkin, GetColor, GetInterior, GetVirtualWorld, GetState, GetVehicleId, GetScore, GetMoney, GetWeapon, GetAmmo, GetWantedLevel, GetSpecialAction, GetDrunkLevel, GetTargetPlayer, GetTargetActor, GetCameraMode, GetVehicleSeat, GetFightingStyle, GetFightingMove, GetWeaponState, GetSurfingVehicleId, IsInCheckpoint, IsInRaceCheckpoint, IsInVehicle, IsInAnyVehicle, IsTyping, IsNPC, IsAdmin, GetCount, GetIdFromName, IsInRangeOfPoint, GetDistanceFromPoint, IsPickupStreamedIn, IsActorStreamedIn, SetSpawnInfo, Spawn, ForceClassSelection, SetPosition, SetPositionFindZ, SetHealth, SetArmour, SetFacingAngle, SetInterior, SetVelocity, SetSkin, SetTeam, SetColor, SetVirtualWorld, SetTime, SetScore, GiveMoney, SetMoney, ResetMoney, SetName, SetDrunkLevel, SetWantedLevel, PutInVehicle, RemoveFromVehicle, ToggleControllable, PlaySound, ApplyAnimation, ClearAnimations, SetSpecialAction, SetCheckpoint, DisableCheckpoint, SetRaceCheckpoint, DisableRaceCheckpoint, SetWorldBounds, ClearWorldBounds, SetMarkerForPlayer, ShowNameTagForPlayer, SetMapIcon, RemoveMapIcon, SetCameraPos, SetCameraLookAt, SetCameraBehindPlayer, ToggleSpectating, SpectatePlayer, SpectateVehicle, SetAmmo, GiveWeapon, ResetWeapons, SetSkillLevel, SetArmedWeapon, SetFightingStyle, SetMaxHealth, InterpolateCameraPos, InterpolateCameraLookAt, SetBlurLevel, SetGameSpeed, ToggleWidescreen, SetShopName, PlayAudioStream, StopAudioStream, PlayCrimeReport, DisableRemoteVehicleCollisions, SetChatBubble, SetWeather, ToggleClock, SetAdmin, CreatePlayerPickup, DestroyPlayerPickup.
-
-### 3. `VehicleAPI` (`api->vehicle`)
-
-- Create, AddStatic, AddStaticEx, Destroy, IsValid, GetModel, GetInterior, LinkToInterior, GetPosition, SetPosition, GetZAngle, SetZAngle, GetHealth, SetHealth, SetToRespawn, GetColor, ChangeColor, ChangePaintjob, GetPaintjob, SetNumberPlate, GetNumberPlate, AttachTrailer, DetachTrailer, IsTrailerAttached, GetTrailer, SetVirtualWorld, GetVirtualWorld, GetVelocity, SetVelocity, SetAngularVelocity, IsOnItsSide, IsUpsideDown, GetSirenState, IsWrecked, IsSunked, GetRespawnDelay, SetRespawnDelay, GetDamageStatus, UpdateDamageStatus, SetParamsForPlayer, ManualEngineAndLights, Repair, Explode, SetParamsCarDoors, GetParamsCarDoors, SetParamsCarWindows, GetParamsCarWindows, ToggleTaxiLight, SetEngineState, SetLightState, SetFeature, SetVisibility, SetHoodState, SetTrunkState, SetDoorState, GetSpawnInfo, SetSpawnInfo, GetSpawnPos, SetSpawnPos, GetComponentInSlot, GetComponentType, AddComponent, RemoveComponent, GetModelInfo, GetParamsSirenState, GetRotationQuat, GetDistanceFromPoint, GetModelCount, GetModelsUsed.
-
-### 4. `ObjectAPI` (`api->object`)
-
-- Create, Destroy, IsValid, GetModel, GetPos, SetPos, GetRot, SetRot, Move, Stop, IsMoving, SetScale, AttachToPlayer, CreatePlayer, DestroyPlayer, IsValidPlayer, GetPlayerModel, GetPlayerPos, SetPlayerPos, GetPlayerRot, SetPlayerRot, MovePlayer, StopPlayer, IsPlayerMoving, AttachPlayerToPlayer.
-
-### 5. `PickupAPI` (`api->pickup`)
-
-- Create, AddStatic, Destroy, DestroyAll, IsValid, IsStatic, GetPosition, GetModel, GetType, GetCount, GetVirtualWorld.
-
-### 6. `GangZoneAPI` (`api->gangzone`)
-
-- Create, Destroy, ShowForPlayer, ShowForAll, HideForPlayer, HideForAll, FlashForPlayer, FlashForAll, StopFlashForPlayer, StopFlashForAll, IsValid.
-
-### 7. `LabelAPI` (`api->label`)
-
-- Create3DText, Delete3DText, Attach3DTextToPlayer, Attach3DTextToVehicle, Update3DText, CreatePlayer3DText, DeletePlayer3DText, UpdatePlayer3DText, IsValid3DText, IsValidPlayer3DText.
-
-### 8. `MenuAPI` (`api->menu`)
-
-- Create, Destroy, AddItem, SetColumnHeader, ShowForPlayer, HideForPlayer, IsValid, Disable, DisableRow, GetPlayerMenu.
-
-### 9. `MessagingAPI` (`api->messaging`)
-
-- SendClientMessage, SendClientMessageToAll, SendPlayerMessageToPlayer, SendPlayerMessageToAll, SendDeathMessage, SendDeathMessageToPlayer, GameTextForAll, GameTextForPlayer.
-
-### 10. `NetStatsAPI` (`api->netstats`)
-
-- GetNetworkStats, GetPlayerNetworkStats, GetBytesReceived, GetBytesSent, GetMessagesReceived, GetMessagesSent, GetMessagesRecvPerSecond, GetPacketLossPercent, GetConnectionStatus, GetConnectedTime, GetIpPort.
-
-### 11. `FileSystemAPI` (`api->filesystem`)
-
-- Open, Close, Read, Write, Seek, Tell, Flush, Eof, Size, Exists, Delete, DirExists, DirCreate, DirDelete.
-
-### 12. `WorldAPI` (`api->world`)
-
-- SetWeather, GetWeather, SetWorldTime, GetWorldTime, SetGravity, GetGravity, GetTickCount, GetServerTickCount, GetServerTickRate, SetGameModeText, ShowNameTags, ShowPlayerMarkers, EnableZoneNames, EnableTirePopping, UsePlayerPedAnims, DisableInteriorEnterExits, DisableVehicleMarkers, DisableNameTagLOS, SetNameTagDrawDistance, LimitGlobalChatRadius, LimitPlayerMarkerRadius, SetDeathDropAmount, GameModeExit, GetWeaponName, FindWeaponId, GetVehicleName, FindVehicleModel, CreateExplosion, CreateExplosionForPlayer, SetDisabledWeapons, EnableStuntBonusForAll, EnableStuntBonusForPlayer, Kick, Ban, BanEx, RemoveBan, IsBanned, BlockIpAddress, UnblockIpAddress.
-
-### 13. `TimersAPI` (`api->timers`)
-
-- SetTimer, KillTimer.
+Native owned services are `CreateNativeTimer`, `CancelNativeTimer`, `QueueWork`, `IsWorkCancelled`, and `CancelOwnedTasks`. A successful registration transfers userData cleanup to the host via its dispose callback. Failure returns zero and leaves ownership with the caller. Raw C plugins must export `AddonMain`, `GetAddonApiVersion`, and `GetAddonSDKSignature`; optional `AddonUnload` releases plugin-owned resources. The C++ framework generates all four.
