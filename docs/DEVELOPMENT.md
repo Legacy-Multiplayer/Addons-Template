@@ -1,9 +1,11 @@
 # Developing an addon
 
+Use **main** for this template and **master** for the separate essential addons.
+
 1. Rename `ExampleAddon` in `CMakeLists.txt`.
 2. Derive a class from `CAddon` in `src/Main.cpp`.
 3. Implement `OnLoad()` and register typed functions/events there.
-4. Add `LEGACY_ADDON(YourClass)` once.
+4. Add `REGISTER_ADDON(YourClass)` once.
 5. Build for the server's 32-bit architecture and install the binary in `addons/`.
 
 The starter has a Lua `hello(name)` function, a connection event, and a once-only script-ready event. Additional source files can contain ordinary helper classes; list them as further arguments to `legacy_addon`.
@@ -31,3 +33,9 @@ The template and essential addons share identical SDK headers and the same CMake
 ## Validation
 
 Build your DLL, test successful and failed initialization, unload/reload, missing/wrong Lua arguments, timers cancelling themselves, entity ID reuse, and background work during shutdown. A build does not establish in-game behavior. Validate Windows and Linux with their native toolchains before publishing binaries for both platforms.
+
+## Formatting and entry declaration
+
+Use `REGISTER_ADDON(YourClass)` once in a source file. There is no alias for the previous entry macro. It exports the same native loader functions, so this rename does not alter the host ABI or protocol.
+
+Keep a blank line between function definitions and between independent logical steps inside functions. Keep related assignments together, spaces around operators, `if (`/`for (` spacing, and one statement per line. The included `.clang-format` maintains the shared SDK style. Do not concatenate method bodies or raw callback declarations to save vertical space.

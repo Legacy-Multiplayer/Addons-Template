@@ -22,6 +22,7 @@ class CAddonValues
     struct Optional : std::false_type
     {
     };
+
     template <typename T>
     struct Optional<std::optional<T>> : std::true_type
     {
@@ -33,12 +34,14 @@ public:
     static std::decay_t<T> Read(const Value* values, size_t count, size_t index)
     {
         using Type = std::decay_t<T>;
+
         if constexpr (Optional<Type>::value)
         {
             if (!values || index >= count || values[index].type == ADDON_VALUE_NIL)
             {
                 return std::nullopt;
             }
+
             return Read<typename Optional<Type>::Type>(values, count, index);
         }
         else
@@ -47,7 +50,9 @@ public:
             {
                 throw std::invalid_argument("Missing argument " + std::to_string(index + 1));
             }
+
             const auto& value = values[index];
+
             if constexpr (std::is_same_v<Type, bool>)
             {
                 if (value.type == ADDON_VALUE_BOOLEAN)
@@ -58,6 +63,7 @@ public:
             else if constexpr (std::is_integral_v<Type>)
             {
                 int64_t integer = 0;
+
                 if (value.type == ADDON_VALUE_INTEGER)
                 {
                     integer = value.integerValue;
@@ -72,6 +78,7 @@ public:
                 {
                     throw std::invalid_argument("Expected an integer at argument " + std::to_string(index + 1));
                 }
+
                 if constexpr (std::is_unsigned_v<Type>)
                 {
                     if (integer < 0 || static_cast<uint64_t>(integer) > std::numeric_limits<Type>::max())
@@ -83,6 +90,7 @@ public:
                 {
                     throw std::out_of_range("Integer argument out of range");
                 }
+
                 return static_cast<Type>(integer);
             }
             else if constexpr (std::is_floating_point_v<Type>)
@@ -91,7 +99,9 @@ public:
                 {
                     throw std::invalid_argument("Expected a number");
                 }
+
                 const auto number = value.type == ADDON_VALUE_INTEGER ? static_cast<double>(value.integerValue) : value.numberValue;
+
                 if ((value.type == ADDON_VALUE_INTEGER || value.type == ADDON_VALUE_NUMBER) &&
                     std::isfinite(number) && number >= -std::numeric_limits<Type>::max() && number <= std::numeric_limits<Type>::max())
                 {
@@ -116,6 +126,7 @@ public:
             {
                 static_assert(!sizeof(Type), "Unsupported addon argument type; use bool, integer, float, double, string or optional");
             }
+
             if constexpr (!std::is_integral_v<Type> || std::is_same_v<Type, bool>)
             {
                 throw std::invalid_argument("Wrong type at argument " + std::to_string(index + 1));
@@ -127,6 +138,7 @@ public:
     static Value Write(const T& value, std::deque<std::string>& strings)
     {
         using Type = std::decay_t<T>;
+
         if constexpr (Optional<Type>::value)
         {
             return value ? Write(*value, strings) : ValueNil();
@@ -144,6 +156,7 @@ public:
                     throw std::out_of_range("Lua integer result out of range");
                 }
             }
+
             return ValueInteger(static_cast<int64_t>(value));
         }
         else if constexpr (std::is_floating_point_v<Type>)
@@ -152,11 +165,13 @@ public:
             {
                 throw std::invalid_argument("Non-finite addon result");
             }
+
             return ValueNumber(value);
         }
         else if constexpr (std::is_convertible_v<Type, std::string>)
         {
             strings.emplace_back(value);
+
             return ValueString(strings.back().c_str());
         }
         else
@@ -170,16 +185,19 @@ template <typename T>
 struct CAddonCallable : CAddonCallable<decltype(&T::operator())>
 {
 };
+
 template <typename R, typename... Args>
 struct CAddonCallable<R (*)(Args...)>
 {
     using Arguments = std::tuple<Args...>;
     static constexpr size_t Count = sizeof...(Args);
 };
+
 template <typename C, typename R, typename... Args>
 struct CAddonCallable<R (C::*)(Args...) const> : CAddonCallable<R (*)(Args...)>
 {
 };
+
 template <typename C, typename R, typename... Args>
 struct CAddonCallable<R (C::*)(Args...)> : CAddonCallable<R (*)(Args...)>
 {
@@ -189,6 +207,7 @@ template <typename Function, size_t... I>
 static decltype(auto) InvokeAddon(Function& function, const Value* args, size_t count, std::index_sequence<I...>)
 {
     using Arguments = typename CAddonCallable<Function>::Arguments;
+
     return function(CAddonValues::Read<std::tuple_element_t<I, Arguments>>(args, count, I)...);
 }
 
@@ -201,11 +220,14 @@ public:
         m_strings.clear();
         m_values.clear();
         Append(std::forward<T>(result));
+
         if (!output || m_values.size() > capacity)
         {
             throw std::length_error("Too many addon results");
         }
+
         std::copy(m_values.begin(), m_values.end(), output);
+
         return static_cast<int>(m_values.size());
     }
 
@@ -215,15 +237,16 @@ private:
     {
         m_values.push_back(CAddonValues::Write(value, m_strings));
     }
+
     template <typename... T>
     void Append(const std::tuple<T...>& values)
     {
         std::apply([this](const auto&... value)
-            {
-                (Append(value), ...);
-            },
-            values);
+        {
+            (Append(value), ...);
+        }, values);
     }
+
     std::deque<std::string> m_strings;
     std::vector<Value> m_values;
 };

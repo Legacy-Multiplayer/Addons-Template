@@ -1,76 +1,65 @@
-# Building Legacy Server Native Addons
+# Building a native addon
 
-This guide explains how to compile native addons from source on Windows and Linux using CMake.
+Use this repository's **main** branch. Use **master** for the separate essential Addons repository.
 
----
+## Requirements
 
-## 1. Prerequisites
+- CMake 3.17 or newer.
+- A C++17 compiler and a 32-bit toolchain matching Legacy Server.
+- Windows: Visual Studio or Build Tools with the Desktop development with C++ workload.
+- Linux: a working i686/multilib C++ toolchain.
 
-### Windows:
-- **CMake**: Version 3.17 or higher ([cmake.org](https://cmake.org/download/))
-- **Visual Studio**: 2019 or 2022 with the **Desktop development with C++** workload (MSVC v142/v143 toolset)
+## Windows
 
-### Linux:
-- **CMake**: Version 3.17 or higher (`sudo apt install cmake` or equivalent)
-- **Compiler**: GCC 9+ or Clang 10+ (`sudo apt install build-essential g++-multilib`)
-
----
-
-## 2. Building on Windows (x86 32-bit)
-
-Native addons must be built as **32-bit (x86)** to match Legacy Server.
-
-Open **Developer PowerShell for VS 2022** (or Command Prompt) and run:
+Run from the template directory:
 
 ```powershell
-# 1. Configure the CMake build system for 32-bit (Win32)
-cmake -S . -B build -A Win32 -DCMAKE_BUILD_TYPE=Release
-
-# 2. Compile the shared library (Release mode)
+cmake -S . -B build -A Win32
 cmake --build build --config Release --parallel
 ```
 
-### Build Artifact:
-The compiled dynamic library will be generated at:
-```
-build/Release/ExampleAddon.dll
-```
-*(or `build/ExampleAddon.dll` depending on the CMake generator)*
+With the Visual Studio generator, the output is `build/Release/ExampleAddon.dll`. A single-configuration Windows generator places the DLL directly in `build/`.
 
----
+## Linux
 
-## 3. Building on Linux
+For an x86-64 host configured with multilib:
 
-Open a terminal in the project root and run:
-
-```bash
-# 1. Configure the CMake build system
-CFLAGS=-m32 CXXFLAGS=-m32 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-
-# 2. Compile the shared library
-cmake --build build -j$(nproc)
+```sh
+CXXFLAGS=-m32 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
 ```
 
-### Build Artifact:
-The compiled shared object will be generated at:
+With a single-configuration generator, the output is `build/ExampleAddon.so`. The CMake helper rejects a 64-bit target because it cannot load into the 32-bit server. Linux binaries must be built and tested with a native Linux toolchain; a Windows DLL cannot be renamed to a shared library.
+
+## Add or rename source files
+
+The project defines its target through:
+
+```cmake
+include(cmake/LegacyAddon.cmake)
+legacy_addon(ExampleAddon src/Main.cpp)
 ```
-build/ExampleAddon.so
+
+Rename `ExampleAddon` there to change the library name. List additional source paths in the same call. Keep the class named in `REGISTER_ADDON(YourClass)` consistent with your implementation; the class and library names do not have to be identical.
+
+## Install
+
+Stop the target server before replacing its loaded addon. Copy the DLL or shared library into that installation's `addons/` directory, then start the server normally and check its log for loader errors.
+
+```text
+server-installation/
+    server.exe                  # server on Linux
+    setup.json
+    addons/
+        ExampleAddon.dll        # ExampleAddon.so on Linux
+    main/
+    scripts/
+    assets/
+    resources/
 ```
 
----
+Deployment paths are chosen by the server operator. The template does not copy libraries automatically or depend on a developer-specific checkout path.
 
-## 4. Deploying to Legacy Server
+## SDK mismatch
 
-1. Navigate to your Legacy Server installation root.
-2. Locate (or create) the `addons/` directory:
-   ```
-   Legacy-Server/
-   ├── server.exe (or server on Linux)
-   ├── setup.json
-   ├── addons/          <-- Place compiled addon here
-   │   └── ExampleAddon.dll (or ExampleAddon.so)
-   ├── main/
-   └── sidescripts/
-   ```
-3. Copy `ExampleAddon.dll` (Windows) or `ExampleAddon.so` (Linux) into `addons/`.
-4. Start the server. The addon loader will automatically discover, load, and initialize `ExampleAddon`. Check `server.log` to confirm initialization messages.
+If the server reports a missing or mismatched SDK fingerprint, replace all four SDK headers with the matching server's copies and rebuild. Version stays 1; the fingerprint enforces the current native layout. Never alter the fingerprint or add an old-export alias to force a mismatched library to load.

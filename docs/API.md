@@ -1,5 +1,7 @@
 # C++ addon API
 
+Use this repository's `main` branch. The essential Addons repository uses `master`.
+
 The public C++ entry point is `#include "CAddon.h"`. The underlying C tables remain in `Addon.h` for low-level integrations.
 
 ## Lifecycle and registration
@@ -8,11 +10,11 @@ The public C++ entry point is `#include "CAddon.h"`. The underlying C tables rem
 | --- | --- |
 | `bool OnLoad()` | Override to register features. Return true on success. False or an exception rolls back owned resources. |
 | `void OnUnload()` | Optional override; called before the framework releases bindings. Also called after partial initialization. |
-| `LEGACY_ADDON(ClassName)` | Generate the instance, version/layout exports, and load/unload exports. Use once per DLL. |
+| `REGISTER_ADDON(ClassName)` | Generate the instance, version/layout exports, and load/unload exports. Use once per DLL. |
 | `Function(name, callable)` | Expose a typed function to Lua. |
 | `Event(name, callable)` | Subscribe to an event using a typed prefix of its arguments; returns an event handle. |
 | `Once(name, callable)` | Subscribe once, including protection against recursive delivery. |
-| `Off(handle)` | Remove one of this addon's event subscriptions; returns success. |
+| `Off(handle)` | Remove one of this addon's event subscriptions; returns success. Captures are released after a currently executing callback returns. |
 | `Builtin(name)` | Essential-addon facility exposing an existing host `__core_` closure directly, preserving Lua tables and callbacks. Missing host functions fail initialization. |
 | `RawFunction(name, callback, userData)` | Low-level `Value` callback for special result shapes. The framework owns registration, not external userData. |
 | `OnCleanup(callback)` | Register a main-thread cleanup callback; callbacks run in reverse order. |
