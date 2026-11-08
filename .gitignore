@@ -42,3 +42,4 @@ CMakeScripts/
 *.swo
 *~
 .DS_Store
+dist/

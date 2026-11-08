@@ -4,10 +4,12 @@ Use this repository's **main** branch. Use **master** for the separate essential
 
 ## Requirements
 
-- CMake 3.17 or newer.
+- CMake 3.20 or newer.
 - A C++17 compiler and a 32-bit toolchain matching Legacy Server.
 - Windows: Visual Studio or Build Tools with the Desktop development with C++ workload.
 - Linux: a working i686/multilib C++ toolchain.
+
+Initialize the pinned SDK first with `git submodule update --init --recursive`, or clone using `--recurse-submodules`.
 
 ## Windows
 
@@ -36,11 +38,12 @@ With a single-configuration generator, the output is `build/ExampleAddon.so`. Th
 The project defines its target through:
 
 ```cmake
-include(cmake/LegacyAddon.cmake)
-legacy_addon(ExampleAddon src/Main.cpp)
+add_subdirectory(SDK)
+include(SDK/cmake/Plugin.cmake)
+legacy_plugin(ExampleAddon src/Main.cpp)
 ```
 
-Rename `ExampleAddon` there to change the library name. List additional source paths in the same call. Keep the class named in `REGISTER_ADDON(YourClass)` consistent with your implementation; the class and library names do not have to be identical.
+Rename `ExampleAddon` there to change the library name. List additional source paths in the same call. Keep the class named in `REGISTER_PLUGIN(YourClass)` consistent with your implementation; the class and library names do not have to be identical.
 
 ## Install
 
@@ -62,4 +65,12 @@ Deployment paths are chosen by the server operator. The template does not copy l
 
 ## SDK mismatch
 
-If the server reports a missing or mismatched SDK fingerprint, replace all four SDK headers with the matching server's copies and rebuild. Version stays 1; the fingerprint enforces the current native layout. Never alter the fingerprint or add an old-export alias to force a mismatched library to load.
+If the server reports a missing or mismatched SDK fingerprint, update the pinned `SDK` submodule to the commit used by the server and rebuild. Version stays 1; the fingerprint enforces the current native layout. Never alter the fingerprint or add an old-export alias to force a mismatched library to load.
+
+## GitHub builds and draft releases
+
+Pushes and pull requests on `main` build Windows x86 and Linux x86. The workflow checks binary architecture and includes a build manifest with source/SDK commits in each package. Linux uses Ubuntu 22.04 with multilib; Windows uses Visual Studio's Win32 toolchain.
+
+Run **Build plugins** manually on `main` with a new version such as `v1.0.0` to prepare a draft after both builds pass. Leave the tag empty for build artifacts only. The release job uses the repository's `GITHUB_TOKEN` with contents-write permission; no personal token is stored. Actions must be enabled by the organization. Review the draft before publishing; the workflow never publishes automatically.
+
+Push the SDK commit first, then consumer repositories. Recursive checkout must be able to fetch the pinned SDK revision. Updating a submodule requires a reviewed commit in each consumer; builds do not track SDK `main` automatically.

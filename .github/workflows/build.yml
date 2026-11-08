@@ -1,0 +1,78 @@
+name: Build plugins
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Optional new tag for a draft release (for example v1.0.0)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            platform: windows-x86
+          - os: ubuntu-22.04
+            platform: linux-x86
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Install Linux multilib
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y gcc-multilib g++-multilib
+      - name: Configure Windows x86
+        if: runner.os == 'Windows'
+        run: cmake -S . -B build -A Win32
+      - name: Configure Linux x86
+        if: runner.os == 'Linux'
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS=-m32 -DCMAKE_CXX_FLAGS=-m32
+      - name: Build
+        run: cmake --build build --config Release --parallel 2
+      - name: Package and verify architecture
+        run: python .github/scripts/package.py ${{ matrix.platform }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: plugin-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  draft-release:
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag != '' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: plugin-*
+          path: packages
+          merge-multiple: true
+      - name: Create a draft only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]] || { echo 'Use a version such as v1.0.0'; exit 1; }
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo 'A release already exists for this tag; choose a new version.'
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" packages/* --draft --target "$GITHUB_SHA" --title "$RELEASE_TAG" --notes 'Windows and Linux x86 builds. Review the build manifest, matching server SDK fingerprint, runtime requirements and artifacts before publishing.'
