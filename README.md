@@ -71,7 +71,7 @@ Lua can call `hello("Kavnn")` and receive `"Hello, Kavnn!"`. Calling `hello()` u
 
 ## Build and install
 
-Clone with `git clone --recurse-submodules <your-repository-url>`. For an existing checkout, run `git submodule update --init --recursive`.
+Clone with `git clone --recurse-submodules https://github.com/Legacy-Multiplayer/Addons-Template.git`. For an existing checkout, run `git submodule update --init --recursive`.
 
 Requirements: CMake 3.20+, C++17 and a 32-bit toolchain matching the server.
 
